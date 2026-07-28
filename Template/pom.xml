@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>pt.landit</groupId>
+    <artifactId>Template</artifactId>
+    <version>1.0</version>
+
+    <properties>
+        <maven.compiler.source>25</maven.compiler.source>
+        <maven.compiler.target>25</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <land.it.version>7.0.0</land.it.version>
+        <shade-plugin.version>3.6.1</shade-plugin.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>pt.landit</groupId>
+            <artifactId>common</artifactId>
+            <version>${land.it.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>pt.landit</groupId>
+            <artifactId>extensions</artifactId>
+            <version>${land.it.version}</version>
+            <scope>provided</scope>
+        </dependency>
+	<!-- Jackson -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>2.18.2</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+            </resource>
+
+            <resource>
+                <directory>frontend/dist</directory>
+                <targetPath>ui</targetPath>
+            </resource>
+        </resources>
+
+        <plugins>
+            <!-- Maven shade plugin is used to package dependencies into the JAR if
+            external libraries (not provided by the LAND IT backend's) are used in the project. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>${shade-plugin.version}</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <createDependencyReducedPom>true</createDependencyReducedPom>
+                            <artifactSet>
+                                <excludes>
+                                    <exclude>pt.landit:common</exclude>
+                                    <exclude>pt.landit:extensions</exclude>
+                                </excludes>
+                            </artifactSet>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+</project>

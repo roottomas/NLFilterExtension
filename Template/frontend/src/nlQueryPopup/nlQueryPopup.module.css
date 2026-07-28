@@ -1,0 +1,366 @@
+.nlQueryPopupDiv {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    min-width: 320px;
+    max-height: 600px;
+    overflow-y: auto;
+}
+
+.clarificationPanel {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.clarificationQuestion {
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+/* multi_choice styles */
+.multiChoiceContainer {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 200px;
+    overflow-y: auto;
+    padding: 8px 4px;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    margin-top: 4px;
+}
+
+.optionItem {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.optionItem label {
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.freeTextOption {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px dashed #ccc;
+}
+
+.freeTextOption label {
+    cursor: pointer;
+    font-size: 14px;
+}
+
+/* numeric_threshold styles */
+.numericContainer {
+    margin-top: 4px;
+}
+
+.rangeInputs {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 4px 0;
+}
+
+.rangeInputs span {
+    font-size: 14px;
+}
+
+.rangeHint {
+    margin-top: 6px;
+    color: #666;
+    font-size: 12px;
+}
+
+/* Slider styles */
+.sliderContainer {
+    margin: 12px 4px 4px 4px;
+    padding: 4px 0;
+}
+
+.slider {
+    width: 100%;
+}
+
+/* Estilização do slider para ficar mais bonito */
+.slider :global(.p-slider-range) {
+    background: #3b82f6;
+}
+
+.slider :global(.p-slider-handle) {
+    background: #ffffff;
+    border: 2px solid #3b82f6;
+    width: 18px;
+    height: 18px;
+    margin-top: -7px;
+}
+
+.slider :global(.p-slider-handle:hover) {
+    background: #3b82f6;
+    border-color: #3b82f6;
+}
+
+.sliderLabels {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 6px;
+    font-size: 12px;
+    color: #666;
+}
+
+.sliderLabels span:first-child {
+    font-weight: 500;
+    color: #3b82f6;
+}
+
+.sliderLabels span:last-child {
+    font-weight: 500;
+    color: #3b82f6;
+}
+
+.sliderLabels .noLimitLabel {
+    color: #999;
+    font-style: italic;
+}
+
+.freeTextContainer {
+    margin-top: 4px;
+}
+
+/* Cabeçalho */
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #e0e0e0;
+    gap: 12px;
+}
+
+.headerActions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.contextInfo {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 13px;
+    color: #555;
+}
+
+.contextLabel {
+    display: flex;
+    gap: 4px;
+}
+
+.contextLabel strong {
+    color: #333;
+}
+
+.resetButton {
+    flex-shrink: 0;
+    padding: 4px 8px !important;
+    font-size: 13px !important;
+    color: #666 !important;
+}
+
+.resetButton:hover {
+    color: #333 !important;
+}
+
+.clearHistoryButton {
+    flex-shrink: 0;
+    padding: 4px 8px !important;
+    font-size: 13px !important;
+    color: #999 !important;
+}
+
+.clearHistoryButton:hover {
+    color: #f44336 !important;
+}
+
+/* Histórico de mensagens */
+.historyContainer {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 280px;
+    min-height: 60px;
+    overflow-y: auto;
+    padding: 8px 4px;
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    background: #fafafa;
+}
+
+/* Estilo de cada mensagem */
+.message {
+    display: flex;
+    flex-direction: column;
+    padding: 8px 12px;
+    border-radius: 8px;
+    max-width: 95%;
+    animation: fadeIn 0.3s ease;
+}
+
+.message.user {
+    align-self: flex-end;
+    background: #e3f2fd;
+    border-bottom-right-radius: 2px;
+}
+
+.message.agent {
+    align-self: flex-start;
+    background: #f5f5f5;
+    border-bottom-left-radius: 2px;
+}
+
+.message.agent.success {
+    background: #e8f5e9;
+    border-left: 4px solid #4caf50;
+}
+
+.message.agent.info {
+    background: #fff3e0;
+    border-left: 4px solid #ff9800;
+}
+
+.message.agent.error {
+    background: #ffebee;
+    border-left: 4px solid #f44336;
+}
+
+.message.loading {
+    background: #f5f5f5;
+    opacity: 0.7;
+}
+
+.messageHeader {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 3px;
+}
+
+.messageAvatar {
+    font-size: 16px;
+    margin-right: 8px;
+}
+
+.messageTimestamp {
+    font-size: 10px;
+    color: #999;
+}
+
+.messageContent {
+    font-size: 14px;
+    line-height: 1.4;
+    word-wrap: break-word;
+}
+
+/* Detalhes da mensagem (sucesso) */
+.messageDetails {
+    margin-top: 6px;
+    padding: 6px 10px;
+    background: rgba(255, 255, 255, 0.7);
+    border-radius: 4px;
+    font-size: 13px;
+}
+
+.detailTitle {
+    color: #2e7d32;
+    margin-bottom: 2px;
+}
+
+.detailDescription {
+    color: #555;
+    font-size: 12px;
+}
+
+/* Clarificação */
+.messageClarification {
+    margin-top: 6px;
+    padding: 4px 10px;
+    background: rgba(255, 152, 0, 0.1);
+    border-radius: 4px;
+    border: 1px dashed #ff9800;
+}
+
+.clarificationHint {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #e65100;
+}
+
+.hintIcon {
+    font-size: 14px;
+}
+
+/* Erro */
+.messageError {
+    margin-top: 4px;
+    padding: 4px 8px;
+    font-size: 12px;
+    color: #c62828;
+}
+
+/* Empty state */
+.emptyHistory {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 20px 16px;
+    color: #999;
+}
+
+.emptyIcon {
+    font-size: 28px;
+    margin-bottom: 6px;
+}
+
+.emptyText {
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.emptySubtext {
+    font-size: 12px;
+    color: #bbb;
+}
+
+/* Loading dots animation */
+.loadingDots span {
+    animation: dotPulse 1.5s infinite;
+}
+
+.loadingDots span:nth-child(1) { animation-delay: 0s; }
+.loadingDots span:nth-child(2) { animation-delay: 0.3s; }
+.loadingDots span:nth-child(3) { animation-delay: 0.6s; }
+
+@keyframes dotPulse {
+    0% { opacity: 0.2; }
+    50% { opacity: 1; }
+    100% { opacity: 0.2; }
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+}

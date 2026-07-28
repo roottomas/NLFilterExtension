@@ -1,0 +1,23 @@
+{
+  "id": "NL-Filter-Extension",
+  "displayName": "NL Filter Generation",
+  "version": "1.3",
+  "author": "Tomás Silvestre",
+  "description": "Gerar filtros através de linguagem natural.",
+  "modules": [
+    {
+      "id": "NL-Query-Function",
+      "type": "function",
+      "className": "modules.NLQueryFunction",
+      "inputClass": "modules.NLQueryFunctionInput",
+      "outputClass": "modules.NLQueryFunctionOutput"
+    },
+    {
+      "id": "NL-Query-UI",
+      "type": "interface",
+      "subtype": "scenario-popup",
+      "component": "NLQueryPopup",
+      "displayName": "NL Filter Generation"
+    }
+  ]
+}
