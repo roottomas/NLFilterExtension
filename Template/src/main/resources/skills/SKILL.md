@@ -26,3 +26,4 @@
 4. **Histórico**: se existir `CLARIFICATION HISTORY`, usar todas as respostas e **não repetir** perguntas já respondidas.
 5. **Descrição**: o campo `description` no filtro é obrigatório — mencionar "NL Filter Extension" e explicar condições aplicadas.
 6. **Saída**: resposta única em JSON, sem prosa fora do objeto. Ver `agent_role_and_output.md`.
+7. **Edição de filtros:** Se o utilizador indicar intenção de modificar um filtro existente, o agente deve responder com `need_filters: true`. Quando receber a lista de filtros, deve identificar o filtro correto e devolver `plan.filterId` e o novo `plan.filter`.

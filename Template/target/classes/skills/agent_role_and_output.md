@@ -150,3 +150,63 @@ Not required when `plan: null` (clarification).
 Exemplo:
 - Utilizador seleciona `__GROUP__:Florestas` → o agente DEVE substituir por:
   ["Florestas de sobreiro", "Florestas de azinheira", ...] (lista completa de `cos_land_use_catalog.md`).
+
+## Detetar intenção de atualizar filtro
+
+Se o utilizador usar palavras como "muda", "altera", "atualiza", "modifica", "edita", "corrige", "refina", "ajusta" seguidas de uma referência a um filtro (título, descrição ou assunto), o agente DEVE:
+
+1. Definir `need_filters: true` na resposta JSON.
+2. NÃO pedir clarificação ao utilizador (a menos que a query seja demasiado vaga).
+3. Aguardar que o backend forneça a lista de filtros existentes.
+
+**Resposta do agente ao detetar intenção de update (antes de receber filtros):**
+
+```json
+{
+  "plan": null,
+  "clarification_question": null,
+  "need_filters": true,
+  "user_response": null,
+  "confidence": 0.60,
+  "warnings": ["O utilizador pretende editar um filtro existente. A aguardar lista de filtros."]
+}
+```
+
+## Quando o backend fornecer a lista de filtros (num segundo prompt), o agente deve:
+
+- Identificar qual filtro o utilizador pretende alterar (pelo título, descrição ou assunto).
+- Devolver plan.filterId com o ID do filtro e plan.filter com as novas condições.
+
+### Resposta do agente após identificar o filtro:
+
+```json
+{
+"plan": {
+"filterId": 123,
+"filter": {
+"title": "Eucalipto na proposta (atualizado)",
+"description": "Este filtro foi atualizado pela extensão 'NL Filter Extension'. Mostra os polígonos da POSP cujo uso proposto é 'Florestas de eucalipto' com área superior a 10 hectares.",
+"activated": true,
+"layers": [
+{
+"layerName": "POSP",
+"ruleJson": { "and": [
+{ "==": [{ "var": "POSP" }, "Florestas de eucalipto"] },
+{ ">=": [{ "var": "area" }, 100000] }
+] }
+}
+]
+}
+},
+"clarification_question": null,
+"user_response": null,
+"confidence": 0.92,
+"warnings": ["Filtro atualizado."]
+}
+```
+
+Nota: Quando o agente responde com need_filters: true, o backend deve:
+- Interromper o fluxo normal.
+- Chamar getUserFilters(scenarioId, versionId).
+- Adicionar a lista de filtros ao prompt e reenviar ao agente.
+- Na segunda chamada, o agente deve identificar o filtro e devolver filterId.
