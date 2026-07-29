@@ -37,9 +37,10 @@ public class NLQueryFunction implements FunctionModule<NLQueryFunctionInput, NLQ
     @Override
     public Uni<NLQueryFunctionOutput> execute(NLQueryFunctionInput input) {
         String prompt = buildPrompt(input);
+
         return Uni.createFrom().item(() -> sendToGemini(prompt))
                 .onItem().transform(this::extractJsonFromGeminiResponse)
-                .onItem().transformToUni(agentResponse -> handleAgentResponse(agentResponse, input.getScenario(), input.getVersion()));
+                .onItem().transformToUni(agentResponse -> handleAgentResponse(agentResponse, input));
     }
 
     private String resolveClarificationTopic(JsonNode agentResponse) {
@@ -58,14 +59,15 @@ public class NLQueryFunction implements FunctionModule<NLQueryFunctionInput, NLQ
     }
 
     /**
-     * Processes the agent's response, extracting the filter from it and persisting it in LAND IT through saveFilter().
-     *
-     * @param agentResponse The JSON node containing the agent's response.
-     * @param scenarioId    The active scenario ID.
-     * @param versionId     The active version ID.
-     * @return A {@link Uni} with the operation result.
+     * Processes the agent's response.
      */
-    private Uni<NLQueryFunctionOutput> handleAgentResponse(JsonNode agentResponse, Long scenarioId, Long versionId) {
+    private Uni<NLQueryFunctionOutput> handleAgentResponse(JsonNode agentResponse, NLQueryFunctionInput input) {
+        Long scenarioId = input.getScenario();
+        Long versionId = input.getVersion();
+
+        boolean needFilters = agentResponse.path("need_filters").asBoolean(false);
+        if (needFilters) return handleUpdateFlow(input);
+
         String clarificationQuestion = extractTextField(agentResponse, "clarification_question");
         if (clarificationQuestion != null) {
             String clarificationType = extractTextField(agentResponse, "clarification_type");
@@ -83,27 +85,118 @@ public class NLQueryFunction implements FunctionModule<NLQueryFunctionInput, NLQ
             return Uni.createFrom().item(NLQueryFunctionOutput.freeText(clarificationQuestion, topic));
         }
 
-        JsonNode filterNode = extractFilterNode(agentResponse);
-        if (filterNode == null) {
+        JsonNode plan = agentResponse.get("plan");
+        if (plan == null || plan.isNull()) {
             String warning = extractFirstWarning(agentResponse);
             return Uni.createFrom().item(NLQueryFunctionOutput.error("Error: " + warning));
         }
 
+        JsonNode filterNode = plan.get("filter");
+        if (filterNode == null || filterNode.isNull()) {
+            return Uni.createFrom().item(NLQueryFunctionOutput.error("No filter provided."));
+        }
+
+        Long filterId = plan.path("filterId").asLong();
+        boolean isUpdate = filterId != null && filterId > 0;
+
         try {
             String title = filterNode.path("title").asText("NL generated filter.");
             ScenariosFilterInputDTO dto = buildFilterInputDTO(filterNode);
-            return backendService.saveFilter(scenarioId, versionId, dto)
-                    .map(saved -> NLQueryFunctionOutput.success("Filter created successfully: " + title));
+
+            if (isUpdate) {
+                return backendService.updateFilter(scenarioId, versionId, filterId, dto)
+                        .map(saved -> NLQueryFunctionOutput.success("Filter updated successfully: " + title));
+            } else {
+                return backendService.saveFilter(scenarioId, versionId, dto)
+                        .map(saved -> NLQueryFunctionOutput.success("Filter created successfully: " + title));
+            }
         } catch (IllegalArgumentException e) {
             return Uni.createFrom().item(NLQueryFunctionOutput.error("Error: " + e.getMessage()));
         }
     }
 
     /**
-     * Parses the clarification options from the agent's response.
+     * Handles the update flow when the agent requests the list of existing filters
+     * (via `need_filters: true`).
+     * This method fetches all filters for the current scenario/version via
+     * `getUserFilters()`, builds a list with each filter's ID, title,
+     * and description, injects this list into a new prompt, and re-sends it to the agent.
      *
-     * @param optionsNode The JSON node containing the options array.
-     * @return A list of {@link ClarificationOption} objects.
+     * The agent uses this list to identify which filter the user wants to modify,
+     * returning the corresponding `filterId`. The response is then forwarded to
+     * `handleAgentResponse`, which performs the actual update via `updateFilter`.
+     *
+     * @param input The function input containing the query and clarification history.
+     * @return A {@link Uni} emitting the result of the update operation.
+     */
+    private Uni<NLQueryFunctionOutput> handleUpdateFlow(NLQueryFunctionInput input) {
+        Long scenarioId = input.getScenario();
+        Long versionId = input.getVersion();
+
+        return backendService.getUserFilters(scenarioId, versionId)
+                .flatMap(filtersDTO -> {
+
+                    List<FilterExpression> expressions = filtersDTO.getExpressions();
+                    if (expressions == null || expressions.isEmpty()) {
+                        return Uni.createFrom().item(NLQueryFunctionOutput.error("No existing filters found to update."));
+                    }
+
+                    StringBuilder filtersList = new StringBuilder();
+                    filtersList.append("\n## EXISTING FILTERS\n");
+                    filtersList.append("Abaixo estão os filtros existentes no cenário:\n\n");
+                    for (FilterExpression expr : expressions) {
+                        filtersList.append("ID: ").append(expr.getId())
+                                .append(", Title: ").append(expr.getTitle())
+                                .append("\n");
+                        if (expr.getDescription() != null && !expr.getDescription().isBlank()) {
+                            filtersList.append("   Description: ").append(expr.getDescription()).append("\n");
+                        }
+                    }
+                    filtersList.append("\nO utilizador pretende atualizar um filtro existente. ");
+                    filtersList.append("Identifique qual filtro o utilizador deseja alterar e devolva `plan.filterId` com o ID correspondente.\n");
+
+                    String updatedPrompt = buildPromptWithFilters(input, filtersList.toString());
+
+                    return Uni.createFrom().item(() -> sendToGemini(updatedPrompt))
+                            .onItem().transform(this::extractJsonFromGeminiResponse)
+                            .flatMap(newAgentResponse -> handleAgentResponse(newAgentResponse, input));
+                })
+                .onFailure().recoverWithItem(err -> {
+                    System.err.println("❌ Erro ao buscar ou processar filtros: " + err.getMessage());
+                    return NLQueryFunctionOutput.error("Failed to fetch existing filters: " + err.getMessage());
+                });
+    }
+
+    /**
+     * Builds prompt with existing filters.
+     */
+    private String buildPromptWithFilters(NLQueryFunctionInput input, String filtersList) {
+        StringBuilder prompt = new StringBuilder(SKILLS_CACHE);
+        prompt.append("\n\n## CURRENT CONTEXT\n")
+                .append("scenarioId: ").append(input.getScenario()).append("\n")
+                .append("versionId: ").append(input.getVersion()).append("\n\n")
+                .append("## ORIGINAL USER QUERY\n")
+                .append(input.getQuery()).append("\n");
+
+        if (input.getClarificationHistory() != null && !input.getClarificationHistory().isEmpty()) {
+            prompt.append("\n## CLARIFICATION HISTORY\n");
+            prompt.append("Perguntas já respondidas — usar estes valores, não repetir:\n\n");
+            for (int i = 0; i < input.getClarificationHistory().size(); i++) {
+                ClarificationExchange ex = input.getClarificationHistory().get(i);
+                prompt.append(i + 1).append(". ");
+                if (ex.getTopic() != null && !ex.getTopic().isBlank()) {
+                    prompt.append("[").append(ex.getTopic()).append("] ");
+                }
+                prompt.append("Q: ").append(ex.getQuestion()).append("\n");
+                prompt.append("   A: ").append(ex.getAnswer()).append("\n\n");
+            }
+        }
+        prompt.append(filtersList);
+        return prompt.toString();
+    }
+
+    /**
+     * Parses the clarification options from the agent's response.
      */
     private List<ClarificationOption> parseClarificationOptions(JsonNode optionsNode) {
         List<ClarificationOption> options = new ArrayList<>();
@@ -122,10 +215,6 @@ public class NLQueryFunction implements FunctionModule<NLQueryFunctionInput, NLQ
 
     /**
      * Extracts a non-blank text field from a JSON response.
-     *
-     * @param node      The source JSON node.
-     * @param fieldName The field to read.
-     * @return The trimmed field value, or {@code null} when missing, null or blank.
      */
     private String extractTextField(JsonNode node, String fieldName) {
         JsonNode field = node.get(fieldName);
@@ -140,24 +229,7 @@ public class NLQueryFunction implements FunctionModule<NLQueryFunctionInput, NLQ
     }
 
     /**
-     * Extracts the filter node from the agent's response.
-     *
-     * @param agentResponse The JSON node containing the agent's response.
-     * @return The "filter" node, or {@code null} if it does not exist.
-     */
-    private JsonNode extractFilterNode(JsonNode agentResponse) {
-        JsonNode plan = agentResponse.get("plan");
-        if (plan == null || plan.isNull()) {
-            return null;
-        }
-        return plan.get("filter");
-    }
-
-    /**
      * Extracts the first warning message from the agent's response.
-     *
-     * @param agentResponse The JSON node containing the agent's response.
-     * @return The text of the first warning, or a generic message if no warnings exist.
      */
     private String extractFirstWarning(JsonNode agentResponse) {
         JsonNode warnings = agentResponse.path("warnings");
@@ -168,10 +240,7 @@ public class NLQueryFunction implements FunctionModule<NLQueryFunctionInput, NLQ
     }
 
     /**
-     * Builds a {@link ScenariosFilterInputDTO} from the filter node of the agent's response.
-     *
-     * @param filterNode The JSON node containing the filter definition.
-     * @return The DTO ready to be persisted.
+     * Builds a {@link ScenariosFilterInputDTO} from the filter node.
      */
     private ScenariosFilterInputDTO buildFilterInputDTO(JsonNode filterNode) {
         String title = filterNode.path("title").asText("Filter generated by NL");
@@ -187,10 +256,6 @@ public class NLQueryFunction implements FunctionModule<NLQueryFunctionInput, NLQ
 
     /**
      * Parses the list of filter layers from the JSON node.
-     *
-     * @param layersNode The JSON node containing the layers array.
-     * @return A list of {@link FilterExpression.Layer} objects.
-     * @throws IllegalArgumentException if the node is not a non-empty array.
      */
     private List<FilterExpression.Layer> parseLayers(JsonNode layersNode) {
         List<FilterExpression.Layer> layers = new ArrayList<>();
@@ -207,10 +272,6 @@ public class NLQueryFunction implements FunctionModule<NLQueryFunctionInput, NLQ
 
     /**
      * Sends the prompt to the Gemini API and returns the raw response.
-     *
-     * @param prompt The complete prompt text to send.
-     * @return The Gemini API response as a JSON string.
-     * @throws RuntimeException if communication fails or the API returns an error.
      */
     private String sendToGemini(String prompt) {
         try {
@@ -238,10 +299,6 @@ public class NLQueryFunction implements FunctionModule<NLQueryFunctionInput, NLQ
 
     /**
      * Extracts and cleans the JSON from the Gemini response, removing markdown code fences.
-     *
-     * @param rawResponse The raw response from the Gemini API.
-     * @return The cleaned JSON as a {@link JsonNode}.
-     * @throws RuntimeException if parsing fails.
      */
     private JsonNode extractJsonFromGeminiResponse(String rawResponse) {
         try {
@@ -250,7 +307,6 @@ public class NLQueryFunction implements FunctionModule<NLQueryFunctionInput, NLQ
                     .path("content").path("parts").get(0)
                     .path("text").asText();
 
-            // Remove markdown ```json ... ```
             String clean = text.replaceAll("(?i)```json\\s*|```", "").trim();
             return MAPPER.readTree(clean);
 
@@ -261,11 +317,6 @@ public class NLQueryFunction implements FunctionModule<NLQueryFunctionInput, NLQ
 
     /**
      * Builds the complete prompt to be sent to Gemini.
-     * The prompt includes the skills (documentation), the current context (scenarioId, versionId),
-     * the user's original query and the last clarification exchange.
-     *
-     * @param input The function input received from the frontend.
-     * @return The complete prompt as a string.
      */
     private String buildPrompt(NLQueryFunctionInput input) {
         StringBuilder prompt = new StringBuilder(SKILLS_CACHE);
@@ -274,6 +325,7 @@ public class NLQueryFunction implements FunctionModule<NLQueryFunctionInput, NLQ
                 .append("versionId: ").append(input.getVersion()).append("\n\n")
                 .append("## ORIGINAL USER QUERY\n")
                 .append(input.getQuery()).append("\n");
+
         if (input.getClarificationHistory() != null && !input.getClarificationHistory().isEmpty()) {
             prompt.append("\n## CLARIFICATION HISTORY\n");
             prompt.append("Perguntas já respondidas — usar estes valores, não repetir:\n\n");
@@ -292,11 +344,7 @@ public class NLQueryFunction implements FunctionModule<NLQueryFunctionInput, NLQ
     }
 
     /**
-     * Loads all skill markdown files from the /skills directory, which is in the resources directory.
-     * The files are read and concatenated into a single string, which is cached
-     * for reuse across all calls.
-     *
-     * @return The concatenated content of all skills.
+     * Loads all skill markdown files from the /skills directory.
      */
     private static String loadSkills() {
         StringBuilder sb = new StringBuilder();
@@ -323,8 +371,6 @@ public class NLQueryFunction implements FunctionModule<NLQueryFunctionInput, NLQ
 
     /**
      * Returns the default list of skill filenames to load.
-     *
-     * @return the list of skill filenames.
      */
     private static List<String> getDefaultSkillFileList() {
         return Arrays.asList(
@@ -343,11 +389,6 @@ public class NLQueryFunction implements FunctionModule<NLQueryFunctionInput, NLQ
 
     /**
      * Loads the Gemini API key from the configuration file.
-     * The file must be located at {@code /config.properties} in the resources directory,
-     * and contain the property {@code gemini.api.key}.
-     *
-     * @return The API key.
-     * @throws IllegalStateException if the key is not found.
      */
     private static String loadApiKey() {
         try (InputStream is = NLQueryFunction.class.getResourceAsStream("/config.properties")) {

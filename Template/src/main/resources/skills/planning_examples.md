@@ -736,3 +736,92 @@ Os tópicos permitem que o backend saiba quais questões já foram resolvidas, e
 "confidence": 0.95,
 "warnings": ["Filtro com duas camadas."]
 }
+
+## Exemplo 23 — Detetar intenção de update (need_filters)
+
+**Input:** "muda no filtro dos eucaliptos a área para > 10 ha"
+
+**Reasoning:** O utilizador quer atualizar um filtro existente. O agente deteta as palavras-chave "muda" e "filtro dos eucaliptos".
+
+**Resposta:**
+
+{
+"plan": null,
+"clarification_question": null,
+"need_filters": true,
+"user_response": null,
+"confidence": 0.75,
+"warnings": ["O utilizador pretende editar um filtro existente."]
+}
+
+---
+
+## Exemplo 24 — Identificar filtro a partir da lista (com filterId)
+
+**Input (segundo prompt, após backend fornecer lista de filtros):**
+
+**Lista de filtros fornecida pelo backend:**
+- ID: 1, Title: "Eucalipto na proposta", Description: "Mostra eucaliptos na POSP"
+- ID: 2, Title: "Pinheiro bravo", Description: "Mostra pinheiros bravos"
+
+**Query original:** "muda no filtro dos eucaliptos a área para > 10 ha"
+
+**Clarification History:** (a troca anterior com `need_filters: true`)
+
+**Reasoning:** O agente identifica que "filtro dos eucaliptos" corresponde ao filtro com título "Eucalipto na proposta" (ID 1). Gera um novo filtro com a área atualizada (10 ha = 100000 m²).
+
+**Resposta:**
+
+{
+"plan": {
+"filterId": 1,
+"filter": {
+"title": "Eucalipto na proposta (área > 10 ha)",
+"description": "Este filtro foi atualizado pela extensão 'NL Filter Extension'. Mostra os polígonos da POSP cujo uso proposto é 'Florestas de eucalipto' com área superior a 10 hectares.",
+"activated": true,
+"layers": [
+{
+"layerName": "POSP",
+"ruleJson": {
+"and": [
+{ "==": [{ "var": "POSP" }, "Florestas de eucalipto"] },
+{ ">=": [{ "var": "area" }, 100000] }
+]
+}
+}
+]
+}
+},
+"clarification_question": null,
+"user_response": null,
+"confidence": 0.92,
+"warnings": ["Filtro atualizado com sucesso."]
+}
+
+---
+
+## Exemplo 25 — Múltiplos filtros com nomes semelhantes (clarificação)
+
+**Input:** "altera o filtro das florestas para incluir também sobreiro"
+
+**Lista de filtros fornecida:**
+- ID: 3, Title: "Florestas de eucalipto"
+- ID: 4, Title: "Florestas de pinheiro bravo"
+
+**Reasoning:** Existem vários filtros com "florestas" no título. O agente não consegue identificar um único filtro, pelo que pede clarificação ao utilizador.
+
+**Resposta:**
+
+{
+"plan": null,
+"clarification_question": "Encontrei vários filtros com 'florestas' no título. Qual pretende alterar?",
+"clarification_type": "multi_choice",
+"clarification_topic": "GENERIC_CHOICE",
+"clarification_options": [
+{ "id": "3", "label": "Florestas de eucalipto", "value": "3" },
+{ "id": "4", "label": "Florestas de pinheiro bravo", "value": "4" }
+],
+"user_response": null,
+"confidence": 0.60,
+"warnings": ["Múltiplos filtros correspondem à pesquisa."]
+}
