@@ -5,6 +5,7 @@ import base.BackendService;
 import base.modules.FunctionModule;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.smallrye.mutiny.Uni;
 import usefulObjects.filters.FilterExpression;
 import modules.ClarificationOption;
@@ -62,57 +63,112 @@ public class NLQueryFunction implements FunctionModule<NLQueryFunctionInput, NLQ
      * Processes the agent's response.
      */
     private Uni<NLQueryFunctionOutput> handleAgentResponse(JsonNode agentResponse, NLQueryFunctionInput input) {
-        Long scenarioId = input.getScenario();
-        Long versionId = input.getVersion();
-
-        boolean needFilters = agentResponse.path("need_filters").asBoolean(false);
-        if (needFilters) return handleUpdateFlow(input);
-
-        String clarificationQuestion = extractTextField(agentResponse, "clarification_question");
-        if (clarificationQuestion != null) {
-            String clarificationType = extractTextField(agentResponse, "clarification_type");
-            String topic = resolveClarificationTopic(agentResponse);
-
-            if ("multi_choice".equals(clarificationType)) {
-                List<ClarificationOption> options = parseClarificationOptions(agentResponse.path("clarification_options"));
-                return Uni.createFrom().item(NLQueryFunctionOutput.multiChoice(clarificationQuestion, options, topic));
-            }
-            if ("numeric_threshold".equals(clarificationType)) {
-                String field = extractTextField(agentResponse, "field");
-                String unit = extractTextField(agentResponse, "unit");
-                return Uni.createFrom().item(NLQueryFunctionOutput.numericThreshold(clarificationQuestion, field, unit, topic));
-            }
-            return Uni.createFrom().item(NLQueryFunctionOutput.freeText(clarificationQuestion, topic));
-        }
-
-        JsonNode plan = agentResponse.get("plan");
-        if (plan == null || plan.isNull()) {
-            String warning = extractFirstWarning(agentResponse);
-            return Uni.createFrom().item(NLQueryFunctionOutput.error("Error: " + warning));
-        }
-
-        JsonNode filterNode = plan.get("filter");
-        if (filterNode == null || filterNode.isNull()) {
-            return Uni.createFrom().item(NLQueryFunctionOutput.error("No filter provided."));
-        }
-
-        Long filterId = plan.path("filterId").asLong();
-        boolean isUpdate = filterId != null && filterId > 0;
-
         try {
+            Long scenarioId = input.getScenario();
+            Long versionId = input.getVersion();
+
+            boolean needFilters = agentResponse.path("need_filters").asBoolean(false);
+            if (needFilters) return handleUpdateFlow(input);
+
+            String clarificationQuestion = extractTextField(agentResponse, "clarification_question");
+            if (clarificationQuestion != null) {
+                String clarificationType = extractTextField(agentResponse, "clarification_type");
+                String topic = resolveClarificationTopic(agentResponse);
+
+                if ("multi_choice".equals(clarificationType)) {
+                    List<ClarificationOption> options = parseClarificationOptions(agentResponse.path("clarification_options"));
+                    return Uni.createFrom().item(NLQueryFunctionOutput.multiChoice(clarificationQuestion, options, topic));
+                }
+                if ("numeric_threshold".equals(clarificationType)) {
+                    String field = extractTextField(agentResponse, "field");
+                    String unit = extractTextField(agentResponse, "unit");
+                    return Uni.createFrom().item(NLQueryFunctionOutput.numericThreshold(clarificationQuestion, field, unit, topic));
+                }
+                return Uni.createFrom().item(NLQueryFunctionOutput.freeText(clarificationQuestion, topic));
+            }
+
+            JsonNode plan = agentResponse.get("plan");
+            if (plan == null || plan.isNull()) {
+                String warning = extractFirstWarning(agentResponse);
+                return Uni.createFrom().item(NLQueryFunctionOutput.error("Error: " + warning));
+            }
+
+            JsonNode filterNode = plan.get("filter");
+            if (filterNode == null || filterNode.isNull()) {
+                return Uni.createFrom().item(NLQueryFunctionOutput.error("No filter provided."));
+            }
+
+            JsonNode filterIdNode = plan.get("filterId");
+            Long filterId = null;
+            if (filterIdNode != null && !filterIdNode.isNull()) {
+                if (filterIdNode.isNumber()) {
+                    filterId = filterIdNode.asLong();
+                } else if (filterIdNode.isTextual()) {
+                    try {
+                        filterId = Long.parseLong(filterIdNode.asText().trim());
+                    } catch (NumberFormatException ignored) {}
+                }
+            }
+            boolean isUpdate = filterId != null && filterId > 0;
+
             String title = filterNode.path("title").asText("NL generated filter.");
-            ScenariosFilterInputDTO dto = buildFilterInputDTO(filterNode);
+            String description = filterNode.path("description").asText(null);
+            List<FilterExpression.Layer> layers = parseLayers(filterNode.path("layers"));
+            FilterExpression fe = new FilterExpression(title, layers, false);
+
+            if (description != null && !description.isBlank()) {
+                fe.setDescription(description);
+            }
+
+            fe.setActivated(true);
+            if (isUpdate) {
+                fe.setId(filterId);
+            }
+
+            ScenariosFilterInputDTO dto = new ScenariosFilterInputDTO(List.of(fe));
 
             if (isUpdate) {
                 return backendService.updateFilter(scenarioId, versionId, filterId, dto)
-                        .map(saved -> NLQueryFunctionOutput.success("Filter updated successfully: " + title));
+                        .replaceWith(NLQueryFunctionOutput.success("Filter updated successfully: " + title))
+                        .onFailure().recoverWithItem(throwable -> {
+                            System.err.println("Update filter failed: " + throwable.getMessage());
+                            return NLQueryFunctionOutput.error("Update failed: " + throwable.getMessage());
+                        });
             } else {
                 return backendService.saveFilter(scenarioId, versionId, dto)
-                        .map(saved -> NLQueryFunctionOutput.success("Filter created successfully: " + title));
+                        .map(saved -> NLQueryFunctionOutput.success("Filter created successfully: " + title))
+                        .onFailure().recoverWithItem(throwable -> {
+                            System.err.println("Create filter failed: " + throwable.getMessage());
+                            return NLQueryFunctionOutput.error("Creation failed: " + throwable.getMessage());
+                        });
             }
-        } catch (IllegalArgumentException e) {
-            return Uni.createFrom().item(NLQueryFunctionOutput.error("Error: " + e.getMessage()));
+        } catch (Exception e) {
+            return Uni.createFrom().item(NLQueryFunctionOutput.error("Internal error: " + e.getMessage()));
         }
+    }
+
+    /**
+     * Parses the list of filter layers from the JSON node.
+     */
+    private List<FilterExpression.Layer> parseLayers(JsonNode layersNode) {
+        List<FilterExpression.Layer> layers = new ArrayList<>();
+        if (!layersNode.isArray() || layersNode.isEmpty()) {
+            throw new IllegalArgumentException("'layers' must be a non-empty array.");
+        }
+        for (JsonNode layerNode : layersNode) {
+            String layerName = layerNode.path("layerName").asText();
+
+            JsonNode ruleJsonNode = layerNode.path("ruleJson");
+            String ruleJson;
+            if (ruleJsonNode.isTextual()) {
+                ruleJson = ruleJsonNode.asText();
+            } else {
+                ruleJson = ruleJsonNode.toString();
+            }
+
+            layers.add(new FilterExpression.Layer(layerName, ruleJson));
+        }
+        return layers;
     }
 
     /**
@@ -151,6 +207,11 @@ public class NLQueryFunction implements FunctionModule<NLQueryFunctionInput, NLQ
                         if (expr.getDescription() != null && !expr.getDescription().isBlank()) {
                             filtersList.append("   Description: ").append(expr.getDescription()).append("\n");
                         }
+                        filtersList.append("   Layers:\n");
+                        for (FilterExpression.Layer layer : expr.getLayers()) {
+                            filtersList.append("     - LayerName: ").append(layer.getLayerName()).append("\n");
+                            filtersList.append("       RuleJson: ").append(layer.getRuleJson()).append("\n");
+                        }
                     }
                     filtersList.append("\nO utilizador pretende atualizar um filtro existente. ");
                     filtersList.append("Identifique qual filtro o utilizador deseja alterar e devolva `plan.filterId` com o ID correspondente.\n");
@@ -162,7 +223,7 @@ public class NLQueryFunction implements FunctionModule<NLQueryFunctionInput, NLQ
                             .flatMap(newAgentResponse -> handleAgentResponse(newAgentResponse, input));
                 })
                 .onFailure().recoverWithItem(err -> {
-                    System.err.println("❌ Erro ao buscar ou processar filtros: " + err.getMessage());
+                    System.err.println("Erro ao buscar ou processar filtros: " + err.getMessage());
                     return NLQueryFunctionOutput.error("Failed to fetch existing filters: " + err.getMessage());
                 });
     }
@@ -252,22 +313,6 @@ public class NLQueryFunction implements FunctionModule<NLQueryFunctionInput, NLQ
             expression.setDescription(description);
         }
         return new ScenariosFilterInputDTO(List.of(expression));
-    }
-
-    /**
-     * Parses the list of filter layers from the JSON node.
-     */
-    private List<FilterExpression.Layer> parseLayers(JsonNode layersNode) {
-        List<FilterExpression.Layer> layers = new ArrayList<>();
-        if (!layersNode.isArray() || layersNode.isEmpty()) {
-            throw new IllegalArgumentException("'layers' must be a non-empty array.");
-        }
-        for (JsonNode layerNode : layersNode) {
-            String layerName = layerNode.path("layerName").asText();
-            String ruleJson = layerNode.path("ruleJson").toString();
-            layers.add(new FilterExpression.Layer(layerName, ruleJson));
-        }
-        return layers;
     }
 
     /**
@@ -404,7 +449,7 @@ public class NLQueryFunction implements FunctionModule<NLQueryFunctionInput, NLQ
             System.err.println("Error reading config.properties: " + e.getMessage());
         }
         throw new IllegalStateException(
-                "GEMINI_API_KEY not defined. Set the GEMINI_API_KEY environment variable or create src/main/resources/config.properties with: gemini.api.key=AIzaSy..."
+                "GEMINI_API_KEY undefined."
         );
     }
 }
