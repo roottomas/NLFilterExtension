@@ -21,7 +21,6 @@ interface ClarificationData {
     question: string;
     type: 'multi_choice' | 'numeric_threshold' | 'free_text';
     options?: ClarificationOption[];
-    field?: string;
     unit?: string;
     topic?: string;
 }
@@ -31,24 +30,18 @@ interface HistoryMessage {
     timestamp: string;
     type: 'user' | 'agent';
     content: string;
-    apiAnswer?: string;
     status?: 'success' | 'error' | 'info' | 'warning';
-    topic?: string;
     details?: {
-        title?: string;
-        description?: string;
-        filterId?: string;
         clarificationQuestion?: string;
-        clarificationOptions?: ClarificationOption[];
         error?: string;
     };
 }
 
+// Enviado ao backend (modules.ClarificationExchange): apenas topic/question/answer.
 interface ClarificationExchange {
     topic: string;
     question: string;
     answer: string;
-    resolvedValue: any;
 }
 
 interface ScenarioVersionInfo {
@@ -88,8 +81,6 @@ export function NLQueryPopup() {
     // Free text state
     const [userResponse, setUserResponse] = useState("");
 
-    const [loading, setLoading] = useState(false);
-
     const formatNumber = (value: number): string => {
         return new Intl.NumberFormat('pt-PT').format(value);
     };
@@ -101,7 +92,6 @@ export function NLQueryPopup() {
         }
     }, [history]);
 
-    // 🔥 Obtém os labels correspondentes aos valores selecionados
     const getSelectedLabels = (values: string[]): string => {
         if (!clarificationData?.options) return values.join(', ');
         const labels = values.map(v => {
@@ -111,24 +101,20 @@ export function NLQueryPopup() {
         return labels.join(', ');
     };
 
-    // Deteta se uma opção é "Todas"
     const isAllOption = (opt: ClarificationOption): boolean => {
         return opt.id === 'all' ||
             opt.label.toLowerCase().includes('todas') ||
             opt.label.toLowerCase().includes('todos');
     };
 
-    // Obtém todas as opções que NÃO são "Todas"
     const getNonAllOptions = (): ClarificationOption[] => {
         return clarificationData?.options?.filter(o => !isAllOption(o)) || [];
     };
 
-    // Obtém o valor da opção "Todas" (se existir)
     const getAllOptionValue = (): string | undefined => {
         return clarificationData?.options?.find(o => isAllOption(o))?.value;
     };
 
-    // Atualiza a seleção de "Todas" automaticamente
     const updateAllOption = (newSelected: string[]) => {
         const allValue = getAllOptionValue();
         if (!allValue) return newSelected;
@@ -144,7 +130,6 @@ export function NLQueryPopup() {
         return newSelected;
     };
 
-    // Adiciona uma mensagem ao histórico da UI
     const addHistoryMessage = (message: Omit<HistoryMessage, 'id' | 'timestamp'>) => {
         const newMessage: HistoryMessage = {
             ...message,
@@ -154,7 +139,6 @@ export function NLQueryPopup() {
         setHistory(prev => [...prev, newMessage]);
     };
 
-    // Formata a resposta do utilizador para exibição no histórico
     const formatUserResponseForDisplay = (): string => {
         if (!clarificationData) return "";
 
@@ -181,7 +165,6 @@ export function NLQueryPopup() {
         return userResponse;
     };
 
-    // Constrói a resposta "bruta" para enviar ao backend (formato estruturado)
     const buildUserResponseRaw = (): string => {
         if (!clarificationData) return "";
         if (clarificationData.type === 'multi_choice') {
@@ -193,32 +176,12 @@ export function NLQueryPopup() {
         return userResponse;
     };
 
-    // Converte a resposta do utilizador num valor estruturado com base no tópico
-    const buildResolvedValue = (topic: string, answer: string): any => {
-        if (!topic) return answer;
-        switch (topic) {
-            case 'LAYER_CONFLICT':
-                return answer.trim();
-            case 'SLOPE':
-            case 'COST':
-            case 'AREA':
-                try {
-                    return JSON.parse(answer);
-                } catch {
-                    return answer;
-                }
-            case 'GENERIC_CHOICE':
-                return answer.split(',').map(s => s.trim());
-            default:
-                return answer;
-        }
-    };
-
     useEffect(() => {
         api.getScenarioVersion()
             .then((info: any) => {
                 setScenarioInfo(info as ScenarioVersionInfo);
             })
+            .catch(() => {});
     }, []);
 
     const resetToInitial = () => {
@@ -270,57 +233,36 @@ export function NLQueryPopup() {
         const currentQuery = query.trim();
         const isClarification = !!clarificationData;
 
-        // ════════════════════════════════════════════════════════════════
-        // NOVA QUERY: limpar exchanges
-        // ════════════════════════════════════════════════════════════════
         if (!isClarification) {
             setClarificationExchanges([]);
         }
 
-        // ════════════════════════════════════════════════════════════════
-        // PREPARAR A TROCA ATUAL (se for clarificação)
-        // ════════════════════════════════════════════════════════════════
         let updatedExchanges = [...clarificationExchanges];
-        let pendingExchange: ClarificationExchange | undefined;
 
         if (isClarification && clarificationData) {
             const rawAnswer = buildUserResponseRaw();
             const displayAnswer = formatUserResponseForDisplay();
-            pendingExchange = {
+            const pendingExchange: ClarificationExchange = {
                 topic: clarificationData.topic || 'GENERIC_TEXT',
                 question: clarificationData.question,
-                answer: rawAnswer || displayAnswer,
-                resolvedValue: buildResolvedValue(
-                    clarificationData.topic || 'GENERIC_TEXT',
-                    rawAnswer || displayAnswer
-                )
+                answer: rawAnswer || displayAnswer
             };
-            // 🔥 ATUALIZAR O ESTADO IMEDIATAMENTE
             updatedExchanges = [...clarificationExchanges, pendingExchange];
             setClarificationExchanges(updatedExchanges);
         }
 
-        // ════════════════════════════════════════════════════════════════
-        // O HISTÓRICO QUE ENVIAMOS AO BACKEND É O ESTADO ATUALIZADO
-        // ════════════════════════════════════════════════════════════════
         const finalHistory = isClarification ? updatedExchanges : [];
 
-        // ════════════════════════════════════════════════════════════════
-        // ADICIONAR MENSAGEM AO UI HISTORY
-        // ════════════════════════════════════════════════════════════════
         const userDisplayMessage = isClarification ? formatUserResponseForDisplay() : currentQuery;
-        const userApiAnswer = isClarification ? buildUserResponseRaw() : undefined;
         addHistoryMessage({
             type: 'user',
-            content: userDisplayMessage || currentQuery,
-            apiAnswer: userApiAnswer
+            content: userDisplayMessage || currentQuery
         });
 
         if (!isClarification) {
             setQuery('');
         }
 
-        setLoading(true);
         setIsProcessing(true);
 
         const effectiveQuery = clarificationData ? (originalQuery ?? currentQuery) : currentQuery;
@@ -343,7 +285,6 @@ export function NLQueryPopup() {
                         details: { error: errorMessage }
                     });
                     toast.current?.show({ severity: "error", summary: "Erro", detail: errorMessage });
-                    setLoading(false);
                     setIsProcessing(false);
                     return;
                 }
@@ -355,7 +296,6 @@ export function NLQueryPopup() {
                         question: res.clarificationQuestion,
                         type: res.clarificationType || 'free_text',
                         options: res.clarificationOptions || [],
-                        field: res.field || '',
                         unit: res.unit || '',
                         topic: res.clarificationTopic || 'GENERIC_TEXT'
                     });
@@ -364,10 +304,8 @@ export function NLQueryPopup() {
                         type: 'agent',
                         content: res.clarificationQuestion,
                         status: 'info',
-                        topic: res.clarificationTopic || 'GENERIC_TEXT',
                         details: {
-                            clarificationQuestion: res.clarificationQuestion,
-                            clarificationOptions: res.clarificationOptions
+                            clarificationQuestion: res.clarificationQuestion
                         }
                     });
 
@@ -380,7 +318,6 @@ export function NLQueryPopup() {
                     setFreeTextValue("");
                     setUseFreeText(false);
                     setUserResponse("");
-                    setLoading(false);
                     setIsProcessing(false);
                     return;
                 }
@@ -394,21 +331,19 @@ export function NLQueryPopup() {
                     addHistoryMessage({
                         type: 'agent',
                         content: `✅ ${successMessage}`,
-                        status: 'success',
-                        details: {
-                            title: res.title || 'Filtro criado',
-                            description: res.description || 'O filtro foi aplicado ao cenário.'
-                        }
+                        status: 'success'
+                    });
+
+                    // 🔥 MENSAGEM ADICIONAL APÓS O SUCESSO
+                    addHistoryMessage({
+                        type: 'agent',
+                        content: "O filtro está a ser executado.",
+                        status: 'info'
                     });
 
                     api.notifyChange('filters');
 
-                    toast.current?.show({
-                        severity: "success",
-                        summary: "Sucesso",
-                        detail: successMessage
-                    });
-                    setLoading(false);
+                    // NOTIFICAÇÃO POP-UP REMOVIDA
                     setIsProcessing(false);
                     return;
                 }
@@ -429,7 +364,6 @@ export function NLQueryPopup() {
                     summary: "Erro",
                     detail: errorMessage
                 });
-                setLoading(false);
                 setIsProcessing(false);
             })
             .catch((err) => {
@@ -448,7 +382,6 @@ export function NLQueryPopup() {
                     summary: "Erro",
                     detail: errorMessage
                 });
-                setLoading(false);
                 setIsProcessing(false);
             });
     };
@@ -482,7 +415,6 @@ export function NLQueryPopup() {
         <div className={styles.nlQueryPopupDiv}>
             <Toast ref={toast} />
 
-            {/* Cabeçalho com contexto + botão de reset */}
             <div className={styles.header}>
                 <div className={styles.contextInfo}>
                     <span className={styles.contextLabel}>
@@ -501,7 +433,7 @@ export function NLQueryPopup() {
                             text
                             size="small"
                             onClick={clearHistory}
-                            disabled={loading}
+                            disabled={isProcessing}
                             className={styles.clearHistoryButton}
                         />
                     )}
@@ -512,13 +444,12 @@ export function NLQueryPopup() {
                         text
                         size="small"
                         onClick={resetToInitial}
-                        disabled={loading}
+                        disabled={isProcessing}
                         className={styles.resetButton}
                     />
                 </div>
             </div>
 
-            {/* Histórico de mensagens (UI) */}
             <div className={styles.historyContainer}>
                 {history.length === 0 && (
                     <div className={styles.emptyHistory}>
@@ -540,18 +471,6 @@ export function NLQueryPopup() {
                         <div className={styles.messageContent}>
                             {msg.content}
                         </div>
-                        {msg.type === 'agent' && msg.status === 'success' && msg.details?.title && (
-                            <div className={styles.messageDetails}>
-                                <div className={styles.detailTitle}>
-                                    <strong>📌 {msg.details.title}</strong>
-                                </div>
-                                {msg.details.description && (
-                                    <div className={styles.detailDescription}>
-                                        {msg.details.description}
-                                    </div>
-                                )}
-                            </div>
-                        )}
                         {msg.type === 'agent' && msg.status === 'info' && msg.details?.clarificationQuestion && (
                             <div className={styles.messageClarification}>
                                 <div className={styles.clarificationHint}>
@@ -734,14 +653,14 @@ export function NLQueryPopup() {
                         label="Cancelar"
                         severity="secondary"
                         outlined
-                        disabled={loading || isProcessing}
+                        disabled={isProcessing}
                         onClick={resetClarification}
                     />
                 )}
                 <Button
                     label={clarificationData ? "Enviar resposta" : "Executar"}
-                    disabled={!scenarioInfo || loading || isProcessing || (clarificationData ? !isResponseValid() : !query.trim())}
-                    loading={loading || isProcessing}
+                    disabled={!scenarioInfo || isProcessing || (clarificationData ? !isResponseValid() : !query.trim())}
+                    loading={isProcessing}
                     onClick={execute}
                 />
             </div>

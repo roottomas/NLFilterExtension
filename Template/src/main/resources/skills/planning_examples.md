@@ -6,47 +6,11 @@ All outputs must include top-level `clarification_question` and `user_response`.
 
 ---
 
-## REGRA CRÍTICA — Formato do `ruleJson`
+## Regras aplicadas nestes exemplos (ver ficheiros dedicados)
 
-O LAND IT UI espera que as condições sejam guardadas com a seguinte estrutura:
-
-{ "or": [{ "==": [{ "var": "CAMPO" }, "OPERADOR VALOR"] }] }
-
-ou
-
-{ "and": [{ "==": [{ "var": "CAMPO" }, "OPERADOR VALOR"] }] }
-
-Use `or` quando o utilizador quer UMA OU OUTRA condição (ex: "eucalipto ou sobreiro").
-Use `and` quando o utilizador quer AMBAS as condições (ex: "eucalipto E área > 5 ha").
-
----
-
-## REGRA CRÍTICA — Descrição do filtro
-
-O campo `description` no `filter` é **obrigatório APENAS quando há filtro**. Deve:
-1. Começar com: "Este filtro foi criado pela extensão 'NL Filter Extension'."
-2. Explicar detalhadamente o que o filtro faz (camada, condições, valores)
-3. Ser escrito em português
-4. Usar SIGLAS (POSP, POSA, REN) — NÃO por extenso
-
-**NOTA:** Quando é uma clarificação (`plan: null`), NÃO incluir `description`.
-
----
-
-## REGRA CRÍTICA — Tópicos de clarificação
-
-Todas as respostas de clarificação (com `plan: null`) DEVEM incluir `clarification_topic`.
-
-Os tópicos permitem que o backend saiba quais questões já foram resolvidas, evitando repetições.
-
-**Tópicos disponíveis:**
-- `LAYER_CONFLICT` — Conflito de camadas (POSP vs Transformação)
-- `GENERIC_CHOICE` — Qualquer escolha múltipla (florestas, urbano, pomares, etc.)
-- `POSA_VS_POSP` — POSA vs POSP
-- `SLOPE` — Declive
-- `COST` — Custo
-- `AREA` — Área
-- `GENERIC_TEXT` — Qualquer texto livre
+- **Formato do `ruleJson`, operadores (`or`/`and`, `in`, `==`), exceção `slope`, conversão ha→m² e `__GROUP__`:** `filter_schema_and_operators.md`.
+- **Regras da `description` do filtro (obrigatória quando há filtro):** `agent_role_and_output.md` (§Description rules).
+- **Tópicos de clarificação (`clarification_topic`) e prioridade:** `clarification_types.md`.
 
 ---
 
@@ -824,4 +788,205 @@ Os tópicos permitem que o backend saiba quais questões já foram resolvidas, e
 "user_response": null,
 "confidence": 0.60,
 "warnings": ["Múltiplos filtros correspondem à pesquisa."]
+}
+
+## Exemplo 26 — Update com termo ambíguo (clarificação antes de atualizar)
+
+**Input (primeira chamada):** "muda o filtro dos eucaliptos para incluir florestas"
+
+**Lista de filtros existentes (fornecida pelo backend):**
+- ID: 1, Title: "Eucaliptos com área entre 5 e 20 ha"
+
+**Reasoning:** O utilizador quer atualizar o filtro com ID 1, mas o termo "florestas" é ambíguo. O agente NÃO deve aplicar diretamente "florestas". Deve clarificar.
+
+**Resposta:**
+
+{
+"plan": null,
+"clarification_question": "Que ocupações florestais pretende incluir no filtro?",
+"clarification_type": "multi_choice",
+"clarification_topic": "GENERIC_CHOICE",
+"clarification_options": [
+{ "id": "all", "label": "Todas as florestas", "value": "__GROUP__:Florestas" },
+{ "id": "eucalipto", "label": "Eucalipto", "value": "Florestas de eucalipto" },
+{ "id": "sobreiro", "label": "Sobreiro", "value": "Florestas de sobreiro" },
+{ "id": "azinheira", "label": "Azinheira", "value": "Florestas de azinheira" },
+{ "id": "pinheiro_bravo", "label": "Pinheiro bravo", "value": "Florestas de pinheiro bravo" },
+{ "id": "pinheiro_manso", "label": "Pinheiro manso", "value": "Florestas de pinheiro manso" }
+],
+"user_response": null,
+"confidence": 0.55,
+"warnings": ["O termo 'florestas' é ambíguo. A clarificar antes de atualizar."]
+}
+
+---
+
+## Exemplo 27 — Aplicar update após clarificação
+
+**Input (segunda chamada, após resposta do utilizador):**
+- Resposta à clarificação: "Florestas de sobreiro, Florestas de azinheira"
+- Filtro identificado: ID 1 ("Eucaliptos com área entre 5 e 20 ha")
+
+**Reasoning:** O utilizador especificou as espécies. O agente pode agora gerar o filtro atualizado com o `filterId`.
+
+**Resposta:**
+
+{
+"plan": {
+"filterId": 1,
+"filter": {
+"title": "Eucaliptos, sobreiro e azinheira com área entre 5 e 20 ha",
+"description": "Este filtro foi atualizado pela extensão 'NL Filter Extension'. Mostra os polígonos da POSP cujo uso proposto é 'Florestas de eucalipto', 'Florestas de sobreiro' ou 'Florestas de azinheira' e com área entre 5 e 20 hectares.",
+"activated": true,
+"layers": [
+{
+"layerName": "POSP",
+"ruleJson": {
+"and": [
+{ "in": [{ "var": "POSP" }, ["Florestas de eucalipto", "Florestas de sobreiro", "Florestas de azinheira"]] },
+{ "and": [
+{ ">=": [{ "var": "area" }, 50000] },
+{ "<=": [{ "var": "area" }, 200000] }
+]
+}
+]
+}
+}
+]
+}
+},
+"clarification_question": null,
+"user_response": null,
+"confidence": 0.92,
+"warnings": ["Filtro atualizado com espécies especificadas."]
+}
+
+## Exemplo 28 — Update com referência vaga (sem título)
+
+**Input:** "muda o filtro"
+
+**Lista de filtros existentes (fornecida pelo backend):**
+- ID: 1, Title: "Eucaliptos com área entre 5 e 20 ha"
+- ID: 2, Title: "Pinheiro manso"
+- ID: 3, Title: "Florestas de sobreiro"
+
+**Reasoning:** O utilizador não especificou qual filtro. O agente deve perguntar.
+
+**Resposta:**
+
+{
+"plan": null,
+"clarification_question": "Qual filtro pretende atualizar?",
+"clarification_type": "multi_choice",
+"clarification_topic": "GENERIC_CHOICE",
+"clarification_options": [
+{ "id": "1", "label": "Eucaliptos com área entre 5 e 20 ha", "value": "1" },
+{ "id": "2", "label": "Pinheiro manso", "value": "2" },
+{ "id": "3", "label": "Florestas de sobreiro", "value": "3" }
+],
+"user_response": null,
+"confidence": 0.60,
+"warnings": ["O utilizador não especificou qual filtro atualizar."]
+}
+
+---
+
+## Exemplo 29 — Update com operador lógico ambíguo
+
+**Input:** "muda o filtro dos eucaliptos para mostrar eucalipto ou pinheiro bravo"
+
+**Lista de filtros existentes (fornecida pelo backend):**
+- ID: 1, Title: "Eucaliptos com área entre 5 e 20 ha"
+
+**Reasoning:** O utilizador especificou o filtro ("dos eucaliptos"), mas o operador lógico "ou" pode ser interpretado como `or` ou `and`. O agente clarifica antes de atualizar.
+
+**Resposta:**
+
+{
+"plan": null,
+"clarification_question": "Pretende incluir eucalipto E pinheiro bravo (ambos), ou eucalipto OU pinheiro bravo (um ou outro)?",
+"clarification_type": "multi_choice",
+"clarification_topic": "GENERIC_CHOICE",
+"clarification_options": [
+{ "id": "both", "label": "Eucalipto E Pinheiro bravo (ambos)", "value": "AND" },
+{ "id": "either", "label": "Eucalipto OU Pinheiro bravo (um ou outro)", "value": "OR" }
+],
+"user_response": null,
+"confidence": 0.55,
+"warnings": ["Operador lógico ambíguo. A clarificar."]
+}
+
+## Exemplo 30 — Update com preservação de condições existentes
+
+**Filtro original:**
+- ID: 1, Title: "Eucaliptos e pinheiros bravos"
+- Layers:
+    - POSP: { "in": [{ "var": "POSP" }, ["Florestas de eucalipto", "Florestas de pinheiro bravo"]] }
+    - Unidades de Transformação: { "and": [{ ">=": [{ "var": "area" }, 50000] }, { "<=": [{ "var": "area" }, 200000] }] }
+
+**Input:** "no filtro dos eucaliptos, muda a área para 3.5"
+
+**Lista de filtros fornecida pelo backend:**
+- ID: 1, Title: "Eucaliptos e pinheiros bravos"
+  Layers:
+    - LayerName: POSP
+      RuleJson: { "in": [{ "var": "POSP" }, ["Florestas de eucalipto", "Florestas de pinheiro bravo"]] }
+    - LayerName: Unidades de Transformação
+      RuleJson: { "and": [{ ">=": [{ "var": "area" }, 50000] }, { "<=": [{ "var": "area" }, 200000] }] }
+
+**Reasoning:** O utilizador pede para alterar a área para 3.5 ha. As condições de uso do solo NÃO foram mencionadas, por isso devem ser mantidas. O agente atualiza apenas a área.
+
+**Resposta:**
+
+{
+"plan": {
+"filterId": 1,
+"filter": {
+"title": "Eucaliptos e pinheiros bravos (área >= 3.5 ha)",
+"description": "Este filtro foi atualizado pela extensão 'NL Filter Extension'. Mostra os polígonos da POSP cujo uso proposto é 'Florestas de eucalipto' ou 'Florestas de pinheiro bravo', com área superior ou igual a 3.5 hectares.",
+"activated": true,
+"layers": [
+{
+"layerName": "POSP",
+"ruleJson": { "in": [{ "var": "POSP" }, ["Florestas de eucalipto", "Florestas de pinheiro bravo"]] }
+},
+{
+"layerName": "Unidades de Transformação",
+"ruleJson": { ">=": [{ "var": "area" }, 35000] }
+}
+]
+}
+},
+"clarification_question": null,
+"user_response": null,
+"confidence": 0.95,
+"warnings": ["Preservadas condições de uso do solo (eucalipto e pinheiro bravo). Área atualizada para >= 3.5 ha."]
+}
+
+## Exemplo 32 — Múltiplos filtros com a mesma referência
+
+**Lista de filtros existentes (fornecida pelo backend):**
+- ID: 1, Title: "Eucaliptos com área entre 5 e 20 ha"
+- ID: 2, Title: "Eucaliptos e pinheiros bravos"
+- ID: 3, Title: "Eucaliptos com custo baixo"
+
+**Input:** "no dos eucaliptos adiciona pinheiros"
+
+**Reasoning:** Existem 3 filtros com "eucaliptos" no título. O agente não pode saber qual deles o utilizador quer modificar.
+
+**Resposta:**
+
+{
+"plan": null,
+"clarification_question": "Encontrei vários filtros com 'eucaliptos'. Qual pretende atualizar?",
+"clarification_type": "multi_choice",
+"clarification_topic": "GENERIC_CHOICE",
+"clarification_options": [
+{ "id": "1", "label": "Eucaliptos com área entre 5 e 20 ha", "value": "1" },
+{ "id": "2", "label": "Eucaliptos e pinheiros bravos", "value": "2" },
+{ "id": "3", "label": "Eucaliptos com custo baixo", "value": "3" }
+],
+"user_response": null,
+"confidence": 0.50,
+"warnings": ["Múltiplos filtros correspondem à referência 'eucaliptos'."]
 }
