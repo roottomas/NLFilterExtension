@@ -1,6 +1,6 @@
 ﻿# Natural language planning examples
 
-Each example shows full reasoning and output JSON. Land-use values use **COS Nomes** (strings), not identifiers. Filters use **JsonLogic** in `plan.filter` (see `filter_schema_and_operators.md`). The executor calls `saveFilter` (or `updateFilter`) directly with the provided filter.
+Each example shows full reasoning and output JSON. Land-use values use **COS Nomes** (strings), not identifiers. Filters use **JsonLogic** in `plan.filter` (see `filter_schema_and_operators.md`). The executor directly calls `saveFilter` with the provided filter.
 
 All outputs must include top-level `clarification_question` and `user_response`. Use `null` for both when the request is clear enough to create a filter.
 
@@ -41,6 +41,70 @@ All outputs must include top-level `clarification_question` and `user_response`.
 "clarification_question": null,
 "user_response": null,
 "confidence": 0.97,
+"warnings": []
+}
+
+---
+
+## 2 — Simple categorical filter (uso atual) → `or`
+
+**Input:** "mostrar onde o uso atual é olival"
+
+**Reasoning:** uso atual → camada POSP, atributo POSA; olival → "Olivais"
+
+{
+"plan": {
+"filter": {
+"title": "Olival no uso atual",
+"description": "Este filtro foi criado pela extensão 'NL Filter Extension'. Mostra os polígonos da POSP cujo uso atual é 'Olivais'.",
+"activated": true,
+"layers": [
+{
+"layerName": "POSP",
+"ruleJson": {
+"or": [
+{ "==": [{ "var": "POSA" }, "Olivais"] }
+]
+}
+}
+]
+}
+},
+"clarification_question": null,
+"user_response": null,
+"confidence": 0.97,
+"warnings": []
+}
+
+---
+
+## 3 — Numeric filter with unit conversion → `or`
+
+**Input:** "polígonos da POSP com área superior a 5 hectares"
+
+**Reasoning:** 5 ha = 50 000 m²; var area; operator >
+
+{
+"plan": {
+"filter": {
+"title": "Área > 5 ha",
+"description": "Este filtro foi criado pela extensão 'NL Filter Extension'. Mostra os polígonos da POSP com área superior a 5 hectares (50 000 m²).",
+"activated": true,
+"layers": [
+{
+"layerName": "POSP",
+"ruleJson": {
+"or": [
+{ ">": [{ "var": "area" }, "50000"] }
+]
+}
+}
+]
+}
+},
+"clarification_question": null,
+"user_response": null,
+"confidence": 0.99,
 "warnings": []
 }
 
@@ -208,6 +272,71 @@ All outputs must include top-level `clarification_question` and `user_response`.
 
 ---
 
+## 9 — Simple area filter → `or`
+
+**Input:** "Ver polígonos da POSP com área superior a 100 metros quadrados"
+
+**Reasoning:** area > 100
+
+{
+"plan": {
+"filter": {
+"title": "Área > 100 m²",
+"description": "Este filtro foi criado pela extensão 'NL Filter Extension'. Mostra os polígonos da POSP com área superior a 100 metros quadrados.",
+"activated": true,
+"layers": [
+{
+"layerName": "POSP",
+"ruleJson": {
+"or": [
+{ ">": [{ "var": "area" }, "100"] }
+]
+}
+}
+]
+}
+},
+"clarification_question": null,
+"user_response": null,
+"confidence": 0.99,
+"warnings": []
+}
+
+---
+
+## 10 — Example using current use (POSA) with multiple conditions → `and`
+
+**Input:** "mostrar áreas onde o uso atual é mato e a proposta é pinheiro bravo"
+
+**Reasoning:** uso atual → "Matos"; proposta → "Florestas de pinheiro bravo"; AMBAS as condições devem ser verdadeiras → `and`
+
+{
+"plan": {
+"filter": {
+"title": "Mato atual → Pinheiro Bravo proposto",
+"description": "Este filtro foi criado pela extensão 'NL Filter Extension'. Mostra os polígonos da POSP cujo uso atual é 'Matos' e cujo uso proposto é 'Florestas de pinheiro bravo'.",
+"activated": true,
+"layers": [
+{
+"layerName": "POSP",
+"ruleJson": {
+"and": [
+{ "==": [{ "var": "POSA" }, "Matos"] },
+{ "==": [{ "var": "POSP" }, "Florestas de pinheiro bravo"] }
+]
+}
+}
+]
+}
+},
+"clarification_question": null,
+"user_response": null,
+"confidence": 0.95,
+"warnings": ["A comparação entre uso atual e proposta é feita na mesma camada POSP."]
+}
+
+---
+
 ## Exemplo 11 — Clarification: ambiguous land-use category (multi_choice)
 
 **Input:** "mostrar floresta"
@@ -292,20 +421,20 @@ All outputs must include top-level `clarification_question` and `user_response`.
 
 ## Exemplo 14 — Clarification: numeric threshold missing (numeric_threshold)
 
-**Input:** "áreas com declive elevado"
+**Input:** "eucalipto na proposta com área grande"
 
-**Reasoning:** "declive elevado" não tem um valor numérico especificado. Usar numeric_threshold com field e unit.
+**Reasoning:** "área grande" não tem um valor numérico especificado. Usar numeric_threshold com field e unit. O declive é a exceção: tem apenas dois valores válidos e usa multi_choice, nunca numeric_threshold (Exemplo 19).
 
 {
 "plan": null,
-"clarification_question": "Qual o intervalo de declive pretendido?",
+"clarification_question": "Qual o intervalo de área pretendido?",
 "clarification_type": "numeric_threshold",
-"clarification_topic": "SLOPE",
-"field": "slope",
-"unit": "%",
+"clarification_topic": "AREA",
+"field": "area",
+"unit": "hectares",
 "user_response": null,
 "confidence": 0.65,
-"warnings": ["'Declive elevado' precisa de clarificação numérica."]
+"warnings": ["'Área grande' precisa de clarificação numérica."]
 }
 
 ---
@@ -323,6 +452,38 @@ All outputs must include top-level `clarification_question` and `user_response`.
 "clarification_topic": "GENERIC_TEXT",
 "user_response": null,
 "confidence": 0.40,
+"warnings": []
+}
+
+---
+
+## Exemplo 16 — No clarification: explicit proposed use → `or`
+
+**Input:** "mostrar olival na proposta"
+
+**Reasoning:** "olival" mapeia para "Olivais" e "na proposta" indica o campo POSP. Não pedir clarificação.
+
+{
+"plan": {
+"filter": {
+"title": "Olival na proposta",
+"description": "Este filtro foi criado pela extensão 'NL Filter Extension'. Mostra os polígonos da POSP cujo uso proposto é 'Olivais'.",
+"activated": true,
+"layers": [
+{
+"layerName": "POSP",
+"ruleJson": {
+"or": [
+{ "==": [{ "var": "POSP" }, "Olivais"] }
+]
+}
+}
+]
+}
+},
+"clarification_question": null,
+"user_response": null,
+"confidence": 0.97,
 "warnings": []
 }
 
@@ -360,6 +521,38 @@ All outputs must include top-level `clarification_question` and `user_response`.
 
 ---
 
+## Exemplo 18 — Filter with slope low → `or`
+
+**Input:** "unidades de transformação com declive baixo"
+
+**Reasoning:** slope = "< 25%"
+
+{
+"plan": {
+"filter": {
+"title": "Declive < 25%",
+"description": "Este filtro foi criado pela extensão 'NL Filter Extension'. Mostra as Unidades de Transformação com declive inferior a 25%.",
+"activated": true,
+"layers": [
+{
+"layerName": "Unidades de Transformação",
+"ruleJson": {
+"or": [
+{ "==": [{ "var": "slope" }, "< 25%"] }
+]
+}
+}
+]
+}
+},
+"clarification_question": null,
+"user_response": null,
+"confidence": 0.95,
+"warnings": []
+}
+
+---
+
 ## Exemplo 19 — Clarification for slope (multi_choice with 2 options)
 
 **Input:** "unidades de transformação com declive"
@@ -378,6 +571,71 @@ All outputs must include top-level `clarification_question` and `user_response`.
 "user_response": null,
 "confidence": 0.60,
 "warnings": ["O campo declive tem apenas dois valores válidos: inferior a 25% e igual ou superior a 25%."]
+}
+
+---
+
+## Exemplo 20 — Multiple conditions com OR (um OU outro) → `or`
+
+**Input:** "mostrar eucalipto ou pinheiro bravo na proposta"
+
+**Reasoning:** eucalipto → "Florestas de eucalipto"; pinheiro bravo → "Florestas de pinheiro bravo". O utilizador quer UM OU OUTRO → `or` com `in`
+
+{
+"plan": {
+"filter": {
+"title": "Eucalipto ou Pinheiro Bravo",
+"description": "Este filtro foi criado pela extensão 'NL Filter Extension'. Mostra os polígonos da POSP cujo uso proposto é 'Florestas de eucalipto' ou 'Florestas de pinheiro bravo'.",
+"activated": true,
+"layers": [
+{
+"layerName": "POSP",
+"ruleJson": {
+"or": [
+{ "in": [{ "var": "POSP" }, ["Florestas de eucalipto", "Florestas de pinheiro bravo"]] }
+]
+}
+}
+]
+}
+},
+"clarification_question": null,
+"user_response": null,
+"confidence": 0.96,
+"warnings": []
+}
+
+---
+
+## Exemplo 21 — Multiple conditions com AND (um E outro) → `and`
+
+**Input:** "mostrar eucalipto na proposta com área > 5 ha"
+
+**Reasoning:** eucalipto → "Florestas de eucalipto"; área > 5 ha. O utilizador quer AMBAS as condições → `and`
+
+{
+"plan": {
+"filter": {
+"title": "Eucalipto com área > 5 ha",
+"description": "Este filtro foi criado pela extensão 'NL Filter Extension'. Mostra os polígonos da POSP cujo uso proposto é 'Florestas de eucalipto' E com área superior a 5 hectares (50 000 m²).",
+"activated": true,
+"layers": [
+{
+"layerName": "POSP",
+"ruleJson": {
+"and": [
+{ "==": [{ "var": "POSP" }, "Florestas de eucalipto"] },
+{ ">": [{ "var": "area" }, "50000"] }
+]
+}
+}
+]
+}
+},
+"clarification_question": null,
+"user_response": null,
+"confidence": 0.97,
+"warnings": []
 }
 
 ---
@@ -586,6 +844,61 @@ All outputs must include top-level `clarification_question` and `user_response`.
 "warnings": ["Filtro atualizado com espécies especificadas."]
 }
 
+## Exemplo 28 — Update com referência vaga (sem título)
+
+**Input:** "muda o filtro"
+
+**Lista de filtros existentes (fornecida pelo backend):**
+- ID: 1, Title: "Eucaliptos com área entre 5 e 20 ha"
+- ID: 2, Title: "Pinheiro manso"
+- ID: 3, Title: "Florestas de sobreiro"
+
+**Reasoning:** O utilizador não especificou qual filtro. O agente deve perguntar.
+
+**Resposta:**
+
+{
+"plan": null,
+"clarification_question": "Qual filtro pretende atualizar?",
+"clarification_type": "multi_choice",
+"clarification_topic": "GENERIC_CHOICE",
+"clarification_options": [
+{ "id": "1", "label": "Eucaliptos com área entre 5 e 20 ha", "value": "1" },
+{ "id": "2", "label": "Pinheiro manso", "value": "2" },
+{ "id": "3", "label": "Florestas de sobreiro", "value": "3" }
+],
+"user_response": null,
+"confidence": 0.60,
+"warnings": ["O utilizador não especificou qual filtro atualizar."]
+}
+
+---
+
+## Exemplo 29 — Update com operador lógico ambíguo
+
+**Input:** "muda o filtro dos eucaliptos para mostrar eucalipto ou pinheiro bravo"
+
+**Lista de filtros existentes (fornecida pelo backend):**
+- ID: 1, Title: "Eucaliptos com área entre 5 e 20 ha"
+
+**Reasoning:** O utilizador especificou o filtro ("dos eucaliptos"), mas o operador lógico "ou" pode ser interpretado como `or` ou `and`. O agente clarifica antes de atualizar.
+
+**Resposta:**
+
+{
+"plan": null,
+"clarification_question": "Pretende incluir eucalipto E pinheiro bravo (ambos), ou eucalipto OU pinheiro bravo (um ou outro)?",
+"clarification_type": "multi_choice",
+"clarification_topic": "GENERIC_CHOICE",
+"clarification_options": [
+{ "id": "both", "label": "Eucalipto E Pinheiro bravo (ambos)", "value": "AND" },
+{ "id": "either", "label": "Eucalipto OU Pinheiro bravo (um ou outro)", "value": "OR" }
+],
+"user_response": null,
+"confidence": 0.55,
+"warnings": ["Operador lógico ambíguo. A clarificar."]
+}
+
 ## Exemplo 30 — Update com preservação de condições existentes
 
 **Filtro original:**
@@ -633,3 +946,56 @@ All outputs must include top-level `clarification_question` and `user_response`.
 "warnings": ["Preservadas condições de uso do solo (eucalipto e pinheiro bravo). Área atualizada para >= 3.5 ha."]
 }
 
+## Exemplo 31 — Segunda clarificação: o histórico não autoriza gerar o plano
+
+**Input:** "unidades de transformação em zonas de floresta, com declive, área grande e custo baixo"
+
+**Histórico de clarificações (já respondido):**
+- `[AREA]` Q: "Qual o intervalo de área pretendido?" A: `{"min":50000,"max":null}`
+- `[COST]` Q: "Qual o intervalo de custo pretendido?" A: `{"min":null,"max":20000}`
+
+**Reasoning:** a interrogação tem **quatro** ambiguidades, todas na camada `Unidades de Transformação`: o limiar de área, o limiar de custo, o declive sem qualificador e a classe COS "floresta". A ordem de prioridade resolveu primeiro os dois limiares numéricos, que já estão no histórico. **Ter histórico não significa que se possa gerar o plano:** enquanto restar uma ambiguidade por resolver, a resposta é outra pergunta. Restam duas, e a prioridade manda o declive antes da classe COS. Respondido o declive, o agente perguntará ainda a classe COS ("floresta"), e só quando as quatro estiverem no histórico é que devolve o `plan`. Nunca assumir um valor para uma ambiguidade que ficou sem resposta, nem descartá-la do filtro.
+
+{
+"plan": null,
+"clarification_question": "Que intervalo de declive pretende?",
+"clarification_type": "multi_choice",
+"clarification_topic": "SLOPE",
+"clarification_options": [
+{ "id": "low", "label": "Declive inferior a 25% (baixo)", "value": "< 25%" },
+{ "id": "high", "label": "Declive igual ou superior a 25% (elevado)", "value": ">= 25%" }
+],
+"user_response": null,
+"confidence": 0.60,
+"warnings": ["Resolvidos AREA e COST. Faltam o declive e a classe COS 'floresta'."]
+}
+
+---
+
+## Exemplo 32 — Múltiplos filtros com a mesma referência
+
+**Lista de filtros existentes (fornecida pelo backend):**
+- ID: 1, Title: "Eucaliptos com área entre 5 e 20 ha"
+- ID: 2, Title: "Eucaliptos e pinheiros bravos"
+- ID: 3, Title: "Eucaliptos com custo baixo"
+
+**Input:** "no dos eucaliptos adiciona pinheiros"
+
+**Reasoning:** Existem 3 filtros com "eucaliptos" no título. O agente não pode saber qual deles o utilizador quer modificar.
+
+**Resposta:**
+
+{
+"plan": null,
+"clarification_question": "Encontrei vários filtros com 'eucaliptos'. Qual pretende atualizar?",
+"clarification_type": "multi_choice",
+"clarification_topic": "GENERIC_CHOICE",
+"clarification_options": [
+{ "id": "1", "label": "Eucaliptos com área entre 5 e 20 ha", "value": "1" },
+{ "id": "2", "label": "Eucaliptos e pinheiros bravos", "value": "2" },
+{ "id": "3", "label": "Eucaliptos com custo baixo", "value": "3" }
+],
+"user_response": null,
+"confidence": 0.50,
+"warnings": ["Múltiplos filtros correspondem à referência 'eucaliptos'."]
+}
