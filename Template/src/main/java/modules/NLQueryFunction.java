@@ -5,10 +5,8 @@ import base.BackendService;
 import base.modules.FunctionModule;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.smallrye.mutiny.Uni;
 import usefulObjects.filters.FilterExpression;
-import modules.ClarificationOption;
 import java.io.*;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -23,9 +21,11 @@ public class NLQueryFunction implements FunctionModule<NLQueryFunctionInput, NLQ
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final HttpClient HTTP_CLIENT = HttpClient.newHttpClient();
+    private static final String DEFAULT_MODEL = "gemini-3.5-flash-lite";
     private static final String GEMINI_API_KEY = loadApiKey();
+    private static final String GEMINI_MODEL = loadModel();
     private static final String GEMINI_URL =
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=" + GEMINI_API_KEY;
+            "https://generativelanguage.googleapis.com/v1beta/models/" + GEMINI_MODEL + ":generateContent";
     private static final String SKILLS_CACHE = loadSkills();
 
     private BackendService backendService;
@@ -37,11 +37,16 @@ public class NLQueryFunction implements FunctionModule<NLQueryFunctionInput, NLQ
 
     @Override
     public Uni<NLQueryFunctionOutput> execute(NLQueryFunctionInput input) {
-        String prompt = buildPrompt(input);
+        return askAgent(buildPrompt(input))
+                .onItem().transformToUni(agentResponse -> handleAgentResponse(agentResponse, input, true));
+    }
 
+    /**
+     * Sends a prompt to the model and returns the parsed agent response.
+     */
+    private Uni<JsonNode> askAgent(String prompt) {
         return Uni.createFrom().item(() -> sendToGemini(prompt))
-                .onItem().transform(this::extractJsonFromGeminiResponse)
-                .onItem().transformToUni(agentResponse -> handleAgentResponse(agentResponse, input));
+                .onItem().transform(this::extractJsonFromGeminiResponse);
     }
 
     private String resolveClarificationTopic(JsonNode agentResponse) {
@@ -62,13 +67,23 @@ public class NLQueryFunction implements FunctionModule<NLQueryFunctionInput, NLQ
     /**
      * Processes the agent's response.
      */
-    private Uni<NLQueryFunctionOutput> handleAgentResponse(JsonNode agentResponse, NLQueryFunctionInput input) {
+    private Uni<NLQueryFunctionOutput> handleAgentResponse(JsonNode agentResponse,
+                                                          NLQueryFunctionInput input,
+                                                          boolean updateFlowAllowed) {
         try {
             Long scenarioId = input.getScenario();
             Long versionId = input.getVersion();
 
-            boolean needFilters = agentResponse.path("need_filters").asBoolean(false);
-            if (needFilters) return handleUpdateFlow(input);
+            // O agente só pode pedir a lista de filtros uma vez por interação: sem esta
+            // guarda, um `need_filters` repetido fazia handleUpdateFlow e handleAgentResponse
+            // chamarem-se mutuamente sem fim.
+            if (agentResponse.path("need_filters").asBoolean(false)) {
+                if (!updateFlowAllowed) {
+                    return Uni.createFrom().item(NLQueryFunctionOutput.error(
+                            "The agent requested the filter list twice for the same query."));
+                }
+                return handleUpdateFlow(input);
+            }
 
             String clarificationQuestion = extractTextField(agentResponse, "clarification_question");
             if (clarificationQuestion != null) {
@@ -114,6 +129,9 @@ public class NLQueryFunction implements FunctionModule<NLQueryFunctionInput, NLQ
             String title = filterNode.path("title").asText("NL generated filter.");
             String description = filterNode.path("description").asText(null);
             List<FilterExpression.Layer> layers = parseLayers(filterNode.path("layers"));
+            // ATENCAO: o 3.o argumento do construtor e o campo `all`, NAO o `activated`.
+            // O `activated` tem de ser posto explicitamente, senao fica false e o filtro
+            // nao e aplicado no mapa.
             FilterExpression fe = new FilterExpression(title, layers, false);
 
             if (description != null && !description.isBlank()) {
@@ -121,6 +139,7 @@ public class NLQueryFunction implements FunctionModule<NLQueryFunctionInput, NLQ
             }
 
             fe.setActivated(true);
+
             if (isUpdate) {
                 fe.setId(filterId);
             }
@@ -216,44 +235,13 @@ public class NLQueryFunction implements FunctionModule<NLQueryFunctionInput, NLQ
                     filtersList.append("\nO utilizador pretende atualizar um filtro existente. ");
                     filtersList.append("Identifique qual filtro o utilizador deseja alterar e devolva `plan.filterId` com o ID correspondente.\n");
 
-                    String updatedPrompt = buildPromptWithFilters(input, filtersList.toString());
-
-                    return Uni.createFrom().item(() -> sendToGemini(updatedPrompt))
-                            .onItem().transform(this::extractJsonFromGeminiResponse)
-                            .flatMap(newAgentResponse -> handleAgentResponse(newAgentResponse, input));
+                    return askAgent(buildPrompt(input, filtersList.toString()))
+                            .flatMap(newAgentResponse -> handleAgentResponse(newAgentResponse, input, false));
                 })
                 .onFailure().recoverWithItem(err -> {
                     System.err.println("Erro ao buscar ou processar filtros: " + err.getMessage());
                     return NLQueryFunctionOutput.error("Failed to fetch existing filters: " + err.getMessage());
                 });
-    }
-
-    /**
-     * Builds prompt with existing filters.
-     */
-    private String buildPromptWithFilters(NLQueryFunctionInput input, String filtersList) {
-        StringBuilder prompt = new StringBuilder(SKILLS_CACHE);
-        prompt.append("\n\n## CURRENT CONTEXT\n")
-                .append("scenarioId: ").append(input.getScenario()).append("\n")
-                .append("versionId: ").append(input.getVersion()).append("\n\n")
-                .append("## ORIGINAL USER QUERY\n")
-                .append(input.getQuery()).append("\n");
-
-        if (input.getClarificationHistory() != null && !input.getClarificationHistory().isEmpty()) {
-            prompt.append("\n## CLARIFICATION HISTORY\n");
-            prompt.append("Perguntas já respondidas — usar estes valores, não repetir:\n\n");
-            for (int i = 0; i < input.getClarificationHistory().size(); i++) {
-                ClarificationExchange ex = input.getClarificationHistory().get(i);
-                prompt.append(i + 1).append(". ");
-                if (ex.getTopic() != null && !ex.getTopic().isBlank()) {
-                    prompt.append("[").append(ex.getTopic()).append("] ");
-                }
-                prompt.append("Q: ").append(ex.getQuestion()).append("\n");
-                prompt.append("   A: ").append(ex.getAnswer()).append("\n\n");
-            }
-        }
-        prompt.append(filtersList);
-        return prompt.toString();
     }
 
     /**
@@ -301,62 +289,78 @@ public class NLQueryFunction implements FunctionModule<NLQueryFunctionInput, NLQ
     }
 
     /**
-     * Builds a {@link ScenariosFilterInputDTO} from the filter node.
-     */
-    private ScenariosFilterInputDTO buildFilterInputDTO(JsonNode filterNode) {
-        String title = filterNode.path("title").asText("Filter generated by NL");
-        String description = filterNode.path("description").asText(null);
-        boolean activated = filterNode.path("activated").asBoolean(true);
-        List<FilterExpression.Layer> layers = parseLayers(filterNode.path("layers"));
-        FilterExpression expression = new FilterExpression(title, layers, activated);
-        if (description != null) {
-            expression.setDescription(description);
-        }
-        return new ScenariosFilterInputDTO(List.of(expression));
-    }
-
-    /**
-     * Sends the prompt to the Gemini API and returns the raw response.
+     * Sends the prompt to the Gemini API. The call is deliberately synchronous: the whole
+     * Uni chain has to stay on the thread that subscribes to it, because the calls made to
+     * BackendService afterwards need the request-scoped identity of that thread.
+     * The API key travels in a header, never in the request URL.
      */
     private String sendToGemini(String prompt) {
+        String jsonPayload;
         try {
             Map<String, Object> payload = Map.of("contents", List.of(Map.of("parts", List.of(Map.of("text", prompt)))));
-            String jsonPayload = MAPPER.writeValueAsString(payload);
-
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(GEMINI_URL))
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(jsonPayload))
-                    .timeout(Duration.ofSeconds(60))
-                    .build();
-
-            HttpResponse<String> response = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() != 200) {
-                throw new RuntimeException("Gemini API returned " + response.statusCode() + ": " + response.body());
-            }
-            return response.body();
-
-        } catch (IOException | InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException("Error contacting Gemini: " + e.getMessage(), e);
+            jsonPayload = MAPPER.writeValueAsString(payload);
+        } catch (IOException e) {
+            throw new RuntimeException("Could not serialize the prompt: " + e.getMessage(), e);
         }
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(GEMINI_URL))
+                .header("Content-Type", "application/json")
+                .header("x-goog-api-key", GEMINI_API_KEY)
+                .POST(HttpRequest.BodyPublishers.ofString(jsonPayload, StandardCharsets.UTF_8))
+                .timeout(Duration.ofSeconds(60))
+                .build();
+
+        HttpResponse<String> response;
+        try {
+            response = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("The call to the agent was interrupted.", e);
+        } catch (IOException e) {
+            throw new RuntimeException("Could not reach the agent: " + e.getMessage(), e);
+        }
+
+        if (response.statusCode() != 200) {
+            throw new RuntimeException("Gemini API returned " + response.statusCode() + ": " + response.body());
+        }
+        return response.body();
     }
 
     /**
      * Extracts and cleans the JSON from the Gemini response, removing markdown code fences.
      */
     private JsonNode extractJsonFromGeminiResponse(String rawResponse) {
+        JsonNode root;
         try {
-            JsonNode root = MAPPER.readTree(rawResponse);
-            String text = root.path("candidates").get(0)
-                    .path("content").path("parts").get(0)
-                    .path("text").asText();
+            root = MAPPER.readTree(rawResponse);
+        } catch (IOException e) {
+            throw new RuntimeException("Gemini response is not valid JSON: " + e.getMessage(), e);
+        }
 
-            String clean = text.replaceAll("(?i)```json\\s*|```", "").trim();
+        // Uma resposta sem 'candidates' significa normalmente conteúdo bloqueado ou quota
+        // esgotada. Sem esta verificação, o get(0) rebentava com uma mensagem opaca.
+        JsonNode candidates = root.path("candidates");
+        if (!candidates.isArray() || candidates.isEmpty()) {
+            String reason = root.path("promptFeedback").path("blockReason").asText(null);
+            if (reason == null) {
+                reason = root.path("error").path("message").asText("no candidates returned");
+            }
+            throw new RuntimeException("Gemini returned no answer: " + reason);
+        }
+
+        String text = candidates.get(0)
+                .path("content").path("parts").path(0)
+                .path("text").asText("");
+
+        String clean = text.replaceAll("(?i)```json\\s*|```", "").trim();
+        if (clean.isEmpty()) {
+            throw new RuntimeException("Gemini returned an empty answer.");
+        }
+        try {
             return MAPPER.readTree(clean);
-
-        } catch (Exception e) {
-            throw new RuntimeException("Invalid Gemini response: " + e.getMessage(), e);
+        } catch (IOException e) {
+            throw new RuntimeException("The agent did not return valid JSON: " + e.getMessage(), e);
         }
     }
 
@@ -364,6 +368,14 @@ public class NLQueryFunction implements FunctionModule<NLQueryFunctionInput, NLQ
      * Builds the complete prompt to be sent to Gemini.
      */
     private String buildPrompt(NLQueryFunctionInput input) {
+        return buildPrompt(input, null);
+    }
+
+    /**
+     * Builds the prompt, optionally appending extra context such as the list of
+     * existing filters used by the update flow.
+     */
+    private String buildPrompt(NLQueryFunctionInput input, String extraContext) {
         StringBuilder prompt = new StringBuilder(SKILLS_CACHE);
         prompt.append("\n\n## CURRENT CONTEXT\n")
                 .append("scenarioId: ").append(input.getScenario()).append("\n")
@@ -383,6 +395,10 @@ public class NLQueryFunction implements FunctionModule<NLQueryFunctionInput, NLQ
                 prompt.append("Q: ").append(ex.getQuestion()).append("\n");
                 prompt.append("   A: ").append(ex.getAnswer()).append("\n\n");
             }
+        }
+
+        if (extraContext != null && !extraContext.isBlank()) {
+            prompt.append(extraContext);
         }
 
         return prompt.toString();
@@ -418,7 +434,7 @@ public class NLQueryFunction implements FunctionModule<NLQueryFunctionInput, NLQ
      * Returns the default list of skill filenames to load.
      */
     private static List<String> getDefaultSkillFileList() {
-        return Arrays.asList(
+        return List.of(
                 "agent_role_and_output.md",
                 "domain_semantics.md",
                 "cos_land_use_catalog.md",
@@ -433,23 +449,51 @@ public class NLQueryFunction implements FunctionModule<NLQueryFunctionInput, NLQ
     }
 
     /**
-     * Loads the Gemini API key from the configuration file.
+     * Loads the Gemini API key, preferring the GEMINI_API_KEY environment variable
+     * so that the key does not have to be packaged inside the extension jar.
      */
     private static String loadApiKey() {
+        String env = System.getenv("GEMINI_API_KEY");
+        if (env != null && !env.isBlank()) {
+            return env.trim();
+        }
+        String key = readProperty("gemini.api.key");
+        if (key != null) {
+            return key;
+        }
+        throw new IllegalStateException(
+                "GEMINI_API_KEY undefined: set the environment variable or gemini.api.key in config.properties."
+        );
+    }
+
+    /**
+     * Loads the model name, so that switching model does not require a code change.
+     */
+    private static String loadModel() {
+        String env = System.getenv("GEMINI_MODEL");
+        if (env != null && !env.isBlank()) {
+            return env.trim();
+        }
+        String model = readProperty("gemini.model");
+        return model != null ? model : DEFAULT_MODEL;
+    }
+
+    /**
+     * Reads a single non-blank property from config.properties, or null.
+     */
+    private static String readProperty(String name) {
         try (InputStream is = NLQueryFunction.class.getResourceAsStream("/config.properties")) {
             if (is != null) {
                 Properties props = new Properties();
                 props.load(is);
-                String propKey = props.getProperty("gemini.api.key");
-                if (propKey != null && !propKey.isBlank()) {
-                    return propKey.trim();
+                String value = props.getProperty(name);
+                if (value != null && !value.isBlank()) {
+                    return value.trim();
                 }
             }
         } catch (IOException e) {
             System.err.println("Error reading config.properties: " + e.getMessage());
         }
-        throw new IllegalStateException(
-                "GEMINI_API_KEY undefined."
-        );
+        return null;
     }
 }

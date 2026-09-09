@@ -58,6 +58,10 @@ interface ScenarioVersionInfo {
 
 const MAX_SLIDER_VALUE = 1000000;
 
+// Criado uma vez: antes era instanciado a cada chamada, dentro do render.
+const NUMBER_FORMAT = new Intl.NumberFormat('pt-PT');
+const formatNumber = (value: number): string => NUMBER_FORMAT.format(value);
+
 export function NLQueryPopup() {
     const toast = useRef<Toast>(null);
     const historyEndRef = useRef<HTMLDivElement>(null);
@@ -81,14 +85,10 @@ export function NLQueryPopup() {
     // Free text state
     const [userResponse, setUserResponse] = useState("");
 
-    const formatNumber = (value: number): string => {
-        return new Intl.NumberFormat('pt-PT').format(value);
-    };
-
     // Scroll para o fim do histórico quando há novas mensagens
     useEffect(() => {
         if (historyEndRef.current) {
-            historyEndRef.current.scrollIntoView({ behavior: 'smooth' });
+            historyEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
     }, [history]);
 
@@ -128,6 +128,16 @@ export function NLQueryPopup() {
             return newSelected.filter(v => v !== allValue);
         }
         return newSelected;
+    };
+
+    const showError = (message: string) => {
+        addHistoryMessage({
+            type: 'agent',
+            content: `❌ Erro: ${message}`,
+            status: 'error',
+            details: { error: message }
+        });
+        toast.current?.show({ severity: "error", summary: "Erro", detail: message });
     };
 
     const addHistoryMessage = (message: Omit<HistoryMessage, 'id' | 'timestamp'>) => {
@@ -181,19 +191,16 @@ export function NLQueryPopup() {
             .then((info: any) => {
                 setScenarioInfo(info as ScenarioVersionInfo);
             })
-            .catch(() => {});
+            .catch(() => {
+                toast.current?.show({
+                    severity: "error",
+                    summary: "Erro",
+                    detail: "Não foi possível obter o cenário e a versão atuais."
+                });
+            });
     }, []);
 
-    const resetToInitial = () => {
-        setOriginalQuery(null);
-        setClarificationData(null);
-        setSelectedOptions([]);
-        setFreeTextValue("");
-        setUseFreeText(false);
-        setLowerBound(0);
-        setUpperBound(null);
-        setUserResponse("");
-        setQuery("");
+    const clearHistory = () => {
         setHistory([]);
         setClarificationExchanges([]);
     };
@@ -207,6 +214,12 @@ export function NLQueryPopup() {
         setLowerBound(0);
         setUpperBound(null);
         setUserResponse("");
+    };
+
+    const resetToInitial = () => {
+        resetClarification();
+        setQuery("");
+        clearHistory();
     };
 
     const isResponseValid = (): boolean => {
@@ -277,15 +290,7 @@ export function NLQueryPopup() {
         api.executeFunctionModule("NL-Filter-Extension", "NL-Query-Function", input)
             .then((res: any) => {
                 if (!res) {
-                    const errorMessage = 'Resposta vazia do servidor.';
-                    addHistoryMessage({
-                        type: 'agent',
-                        content: `❌ Erro: ${errorMessage}`,
-                        status: 'error',
-                        details: { error: errorMessage }
-                    });
-                    toast.current?.show({ severity: "error", summary: "Erro", detail: errorMessage });
-                    setIsProcessing(false);
+                    showError('Resposta vazia do servidor.');
                     return;
                 }
 
@@ -318,7 +323,6 @@ export function NLQueryPopup() {
                     setFreeTextValue("");
                     setUseFreeText(false);
                     setUserResponse("");
-                    setIsProcessing(false);
                     return;
                 }
 
@@ -342,46 +346,16 @@ export function NLQueryPopup() {
                     });
 
                     api.notifyChange('filters');
-
-                    // NOTIFICAÇÃO POP-UP REMOVIDA
-                    setIsProcessing(false);
                     return;
                 }
 
                 // --- CASO 3: ERRO ---
-                const errorMessage = res.message || 'Ocorreu um erro ao criar o filtro.';
-                addHistoryMessage({
-                    type: 'agent',
-                    content: `❌ Erro: ${errorMessage}`,
-                    status: 'error',
-                    details: {
-                        error: errorMessage
-                    }
-                });
-
-                toast.current?.show({
-                    severity: "error",
-                    summary: "Erro",
-                    detail: errorMessage
-                });
-                setIsProcessing(false);
+                showError(res.message || 'Ocorreu um erro ao criar o filtro.');
             })
             .catch((err) => {
-                const errorMessage = err.message || 'Falha na comunicação com o servidor.';
-                addHistoryMessage({
-                    type: 'agent',
-                    content: `❌ Erro: ${errorMessage}`,
-                    status: 'error',
-                    details: {
-                        error: errorMessage
-                    }
-                });
-
-                toast.current?.show({
-                    severity: "error",
-                    summary: "Erro",
-                    detail: errorMessage
-                });
+                showError(err?.message || 'Falha na comunicação com o servidor.');
+            })
+            .finally(() => {
                 setIsProcessing(false);
             });
     };
@@ -404,11 +378,6 @@ export function NLQueryPopup() {
 
         setSelectedOptions(newSelected);
         if (checked) setUseFreeText(false);
-    };
-
-    const clearHistory = () => {
-        setHistory([]);
-        setClarificationExchanges([]);
     };
 
     return (

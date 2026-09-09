@@ -42,7 +42,6 @@ Estrutura do `filter`, operadores JsonLogic, filtros multi-camada e expansão de
 ```json
 {
   "plan": {
-    "steps": [],
     "filter": {
       "title": "Eucalipto na POSP",
       "description": "Este filtro foi criado pela extensão 'NL Filter Extension'. Mostra os polígonos da POSP cujo uso proposto é 'Florestas de eucalipto'.",
