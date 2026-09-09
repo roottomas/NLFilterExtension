@@ -1,6 +1,6 @@
 # Available functions reference
 
-O executor (`NLQueryFunction`) chama estas funções do `BackendService` depois de receber o JSON do planeador. O array `steps` do plano está sempre vazio (não usado nesta versão) — o executor age diretamente sobre `plan`.
+O executor (`NLQueryFunction`) chama estas funções do `BackendService` depois de receber o JSON do planeador, agindo diretamente sobre `plan`.
 
 ## Como o `plan` mapeia para as funções
 
