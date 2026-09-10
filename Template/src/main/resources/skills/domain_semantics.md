@@ -8,6 +8,38 @@ All land-use filter values are **COS Nomes** (strings). Full catalog: `cos_land_
 
 Quando a query contém um uso do solo, o agente DEVE criar uma camada `POSP` separada, mesmo que a query também contenha atributos da Transformação (custo, declive, área). As condições de uso do solo vão na POSP; os atributos de Transformação vão na camada `Unidades de Transformação`.
 
+### Modificadores "novo" e "replantação"
+
+Estes modificadores mudam o **campo** a comparar dentro da mesma camada `POSP` — não implicam conflito de camadas.
+
+- **"novo" / "nova" / "novas"** (ex: "novas florestas de eucalipto", "nova área de olival")
+  → o uso proposto existe, mas **não existe atualmente**.
+  → Filtrar: `POSP == "<COS Nome>"` **AND** `POSA != "<COS Nome>"`.
+  → Exemplo JsonLogic:
+  ```json
+  {
+    "and": [
+      { "==": [ { "var": "POSP" }, "Florestas de eucalipto" ] },
+      { "!=": [ { "var": "POSA" }, "Florestas de eucalipto" ] }
+    ]
+  }
+
+- **"replantação" (qualquer tipo de planta ou árvore)**
+  → o uso existe simultaneamente na proposta e no atual.
+  → Filtrar: POSP == "<COS Nome>" AND POSA == "<COS Nome>".
+  → Exemplo JsonLogic:
+
+```json
+{
+"and": [
+{ "==": [ { "var": "POSP" }, "Florestas de eucalipto" ] },
+{ "==": [ { "var": "POSA" }, "Florestas de eucalipto" ] }
+]
+}
+```
+
+Regra: Estes modificadores aplicam-se sem clarificação se a espécie/uso for identificável (ex: "novas florestas de eucalipto"). Se o uso em si for ambíguo ("novas florestas"), clarificar apenas o uso (GENERIC_CHOICE), mantendo o modificador na memória do plano.
+
 ### Matching rules
 
 1. **Exact name or synonym** → single COS name with `==`.
