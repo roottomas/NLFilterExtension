@@ -123,19 +123,15 @@ A pergunta deve ser:
 
 "Áreas a converter para olival" → POSP with `POSP = "Olivais"`. Use `Unidades de Transformação` only when cost, slope, or transformation unit is explicitly mentioned.
 
-### Quando a query contém `ou` entre categorias COS diferentes
+### Quando a query contém mais do que uma categoria COS
 
 Exemplo: "mostra florestas ou áreas urbanas"
 
-Neste caso, o agente DEVE clarificar **cada categoria separadamente**, a menos que já tenha resolvido uma delas.
+Todas as ambiguidades de classe COS partilham o tópico `GENERIC_CHOICE`, e cada tópico é perguntado no máximo uma vez por interação. Não clarificar categoria a categoria: emitir **uma única** `GENERIC_CHOICE` cujas opções cobrem todas as categorias envolvidas.
 
 Fluxo correto:
-1. Se a query contém `ou` entre categorias diferentes, o agente pergunta primeiro:
-   "Pretende incluir florestas, áreas urbanas, ou ambas?"
-   (Isto é uma `multi_choice` com opções: Florestas, Áreas Urbanas, Ambas)
+1. Identificar todas as categorias ambíguas da query.
+2. Construir uma lista de opções que as cubra a todas, agrupando por categoria e incluindo a opção agregadora `__GROUP__` das categorias que tenham grupo definido em `cos_land_use_catalog.md`.
+3. Emitir uma só pergunta `multi_choice` com `clarification_topic: "GENERIC_CHOICE"`.
 
-2. Depois, para cada categoria selecionada:
-    - Se o utilizador escolheu florestas (ou ambas) → clarifica `GENERIC_CHOICE` com as espécies florestais.
-    - Se o utilizador escolheu áreas urbanas (ou ambas) → clarifica `GENERIC_CHOICE` com os tipos urbanos.
-
-**Regra de ouro:** O agente só pode usar `GENERIC_CHOICE` uma vez por categoria. Se já clarificou florestas, não volta a perguntar.
+**Regra de ouro:** nunca emitir `GENERIC_CHOICE` mais do que uma vez na mesma interação. Se o tópico já consta do `CLARIFICATION HISTORY`, o assunto está encerrado e o agente avança para o filtro ou para outro tópico ainda em aberto.

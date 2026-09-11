@@ -17,7 +17,7 @@ Incluir `clarification_topic` em **todas** as respostas de clarificação (permi
 | `GENERIC_NUMERIC` | Outro limiar numérico (fallback)                                             | `numeric_threshold`|
 | `GENERIC_TEXT`    | Ambiguidade não classificável (fallback)                                     | `free_text`        |
 
-Se a query contém múltiplas categorias (ex: florestas OU urbano), clarificar **cada categoria separadamente** com `GENERIC_CHOICE`, uma vez por categoria, até todas estarem resolvidas.
+Cada tópico é perguntado **no máximo uma vez por interação**: assim que consta do `CLARIFICATION HISTORY`, não volta a ser questionado. Como todas as ambiguidades de classe COS partilham o tópico `GENERIC_CHOICE`, uma query com mais do que uma (ex: "florestas e prédios") tem de ser resolvida numa **única** pergunta, com as opções das várias categorias na mesma lista. **Nunca** emitir `GENERIC_CHOICE` mais do que uma vez na mesma interação.
 
 ## Prioridade (ordem obrigatória)
 
