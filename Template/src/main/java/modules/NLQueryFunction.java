@@ -74,9 +74,6 @@ public class NLQueryFunction implements FunctionModule<NLQueryFunctionInput, NLQ
             Long scenarioId = input.getScenario();
             Long versionId = input.getVersion();
 
-            // O agente só pode pedir a lista de filtros uma vez por interação: sem esta
-            // guarda, um `need_filters` repetido fazia handleUpdateFlow e handleAgentResponse
-            // chamarem-se mutuamente sem fim.
             if (agentResponse.path("need_filters").asBoolean(false)) {
                 if (!updateFlowAllowed) {
                     return Uni.createFrom().item(NLQueryFunctionOutput.error(
@@ -129,9 +126,6 @@ public class NLQueryFunction implements FunctionModule<NLQueryFunctionInput, NLQ
             String title = filterNode.path("title").asText("NL generated filter.");
             String description = filterNode.path("description").asText(null);
             List<FilterExpression.Layer> layers = parseLayers(filterNode.path("layers"));
-            // ATENCAO: o 3.o argumento do construtor e o campo `all`, NAO o `activated`.
-            // O `activated` tem de ser posto explicitamente, senao fica false e o filtro
-            // nao e aplicado no mapa.
             FilterExpression fe = new FilterExpression(title, layers, false);
 
             if (description != null && !description.isBlank()) {
@@ -338,8 +332,6 @@ public class NLQueryFunction implements FunctionModule<NLQueryFunctionInput, NLQ
             throw new RuntimeException("Gemini response is not valid JSON: " + e.getMessage(), e);
         }
 
-        // Uma resposta sem 'candidates' significa normalmente conteúdo bloqueado ou quota
-        // esgotada. Sem esta verificação, o get(0) rebentava com uma mensagem opaca.
         JsonNode candidates = root.path("candidates");
         if (!candidates.isArray() || candidates.isEmpty()) {
             String reason = root.path("promptFeedback").path("blockReason").asText(null);

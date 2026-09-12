@@ -58,7 +58,6 @@ interface ScenarioVersionInfo {
 
 const MAX_SLIDER_VALUE = 1000000;
 
-// Criado uma vez: antes era instanciado a cada chamada, dentro do render.
 const NUMBER_FORMAT = new Intl.NumberFormat('pt-PT');
 const formatNumber = (value: number): string => NUMBER_FORMAT.format(value);
 
@@ -338,7 +337,6 @@ export function NLQueryPopup() {
                         status: 'success'
                     });
 
-                    // 🔥 MENSAGEM ADICIONAL APÓS O SUCESSO
                     addHistoryMessage({
                         type: 'agent',
                         content: "O filtro está a ser executado.",
@@ -348,8 +346,6 @@ export function NLQueryPopup() {
                     api.notifyChange('filters');
                     return;
                 }
-
-                // --- CASO 3: ERRO ---
                 showError(res.message || 'Ocorreu um erro ao criar o filtro.');
             })
             .catch((err) => {
